@@ -1,6 +1,6 @@
 {
   "name": "Focus ADHD Task Manager",
   "description": "An ADHD-focused task manager featuring a Primary focus list, Brain Dump with an Impulse Buffer, Ghost Mode for removing distractions, and an Echo Focus timer.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone", "notifications"],
   "majorCapabilities": []
 }
