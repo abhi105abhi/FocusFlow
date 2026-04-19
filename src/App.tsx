@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Ghost, Trash2, Zap, Target, Check, Crown, Clock, Maximize2, Play, Pause, Minimize2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Mic, Check, Clock, Maximize2, Play, Pause, Minimize2, Sun, LifeBuoy, ArrowDown, ArrowUp, Trash2, Volume2, VolumeX, Sprout, TreePine, Flower2, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types ---
-
 type EffortSize = 'short' | 'medium' | 'deep';
 
 interface Subtask {
@@ -17,18 +16,15 @@ interface Task {
   text: string;
   completed: boolean;
   createdAt: number;
-  
-  // Primary specifics
-  isFrog?: boolean;
+  status: 'today' | 'backlog';
   estimatedTime?: EffortSize | null;
   subtasks?: Subtask[];
 }
 
 const TIME_MAP: Record<EffortSize, number> = { short: 15, medium: 45, deep: 90 };
-const BANKRUPTCY_MS = 48 * 60 * 60 * 1000; // 48 hours in MS
+const BANKRUPTCY_HR = 48; // Auto-purge backlog after 48h
 
 // --- Custom Hooks ---
-
 function useLocalStorage<T>(key: string, initialValue: T) {
   const [storedValue, setStoredValue] = useState<T>(() => {
     try {
@@ -48,101 +44,222 @@ function useLocalStorage<T>(key: string, initialValue: T) {
 
 // --- Components ---
 
-function HyperfocusOverlay({ 
-  task, 
-  onClose, 
-  onComplete 
-}: { 
-  task: Task; 
-  onClose: () => void; 
-  onComplete: () => void; 
-}) {
-  // Start with estimation or default 25m
+// 1. Time Sweep Visualizer
+function TimeSweep({ totalSeconds, remainingSeconds }: { totalSeconds: number, remainingSeconds: number }) {
+  const isOvertime = remainingSeconds < 0;
+  const absRemaining = Math.abs(remainingSeconds);
+  const progress = isOvertime ? 1 : Math.max(0, remainingSeconds / totalSeconds);
+  
+  const radius = 120;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - progress * circumference;
+
+  return (
+    <div className="relative flex items-center justify-center w-64 h-64 mb-8">
+      <svg className="absolute inset-0 w-full h-full transform -rotate-90">
+        <circle
+          cx="128" cy="128" r={radius}
+          className={isOvertime ? "stroke-orange-100" : "stroke-slate-100"}
+          strokeWidth="12" fill="transparent"
+        />
+        <circle
+          cx="128" cy="128" r={radius}
+          className={isOvertime ? "stroke-orange-400" : "stroke-teal-500"}
+          strokeWidth="12" fill="transparent"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          style={{ transition: 'stroke-dashoffset 1s linear' }}
+        />
+      </svg>
+      <div className="z-10 flex flex-col items-center">
+        {isOvertime ? (
+          <>
+            <span className="text-orange-600 font-bold text-sm mb-1">Flow Overtime</span>
+            <span className="text-4xl font-bold text-slate-800">+{Math.floor(absRemaining/60)}:{(absRemaining%60).toString().padStart(2,'0')}</span>
+          </>
+        ) : (
+          <span className="text-4xl font-bold text-slate-800">{Math.floor(absRemaining/60)}:{(absRemaining%60).toString().padStart(2,'0')}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 2. Integrated Focus Room
+function HyperfocusOverlay({ task, onClose, onComplete }: { task: Task; onClose: () => void; onComplete: (reward: number) => void; }) {
   const defaultSeconds = task.estimatedTime ? TIME_MAP[task.estimatedTime] * 60 : 25 * 60;
   const [timeLeft, setTimeLeft] = useState(defaultSeconds);
   const [isRunning, setIsRunning] = useState(true);
+  const [isNoiseActive, setIsNoiseActive] = useState(false);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (isRunning && timeLeft > 0) {
+    if (isRunning) {
       interval = setInterval(() => setTimeLeft(t => t - 1), 1000);
     }
     return () => clearInterval(interval);
-  }, [isRunning, timeLeft]);
+  }, [isRunning]);
 
-  const m = Math.floor(timeLeft / 60);
-  const s = timeLeft % 60;
+  // Integrated Brown Noise Generator for Ambient Focus
+  useEffect(() => {
+    if (!isNoiseActive) return;
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    
+    const ctx = new AudioContextClass();
+    const bufferSize = ctx.sampleRate * 2; 
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const output = buffer.getChannelData(0);
+    
+    let lastOut = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      output[i] = (lastOut + (0.02 * white)) / 1.02;
+      lastOut = output[i];
+      output[i] *= 3.5; 
+    }
+    
+    const noiseource = ctx.createBufferSource();
+    noiseource.buffer = buffer;
+    noiseource.loop = true;
+    
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = 0.03; // Soft, ambient volume
+    
+    noiseource.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    noiseource.start(0);
+
+    return () => {
+      noiseource.stop();
+      ctx.close();
+    };
+  }, [isNoiseActive]);
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 1.05 }}
-      className="fixed inset-0 z-[100] bg-[#020202] text-white flex flex-col items-center justify-center p-8 backdrop-blur-3xl"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] bg-[#FAFAFA] text-slate-800 flex flex-col md:flex-row shadow-2xl"
     >
-      <button onClick={onClose} className="absolute top-8 right-8 text-white/30 hover:text-white transition-colors">
+      <button onClick={onClose} className="absolute top-8 right-8 text-slate-400 hover:text-slate-800 z-50 transition-colors">
         <Minimize2 className="w-8 h-8" />
       </button>
 
-      <div className="absolute top-12 flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-emerald-500 uppercase tracking-[0.3em] text-xs font-bold animate-pulse">
-        <Target className="w-4 h-4" /> Hyperfocus Active
+      {/* Ambient Body Doubling Avatar panel */}
+      <div className="flex-1 bg-slate-50 flex flex-col items-center justify-center p-8 border-r border-slate-200">
+        <div className="w-64 h-64 bg-slate-200 rounded-[2rem] mb-8 relative overflow-hidden shadow-inner flex items-center justify-center border-4 border-white">
+          <motion.div 
+            animate={{ y: [0, -4, 0] }} 
+            transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
+            className="w-32 h-40 bg-slate-300 rounded-t-3xl absolute bottom-0 flex flex-col items-center"
+          >
+            <div className="w-16 h-16 rounded-full bg-slate-400 -mt-8 shadow-sm"></div>
+          </motion.div>
+          <div className="absolute bottom-4 left-4 bg-white/90 px-3 py-1.5 rounded-lg shadow-sm">
+            <span className="text-xs font-bold text-slate-500">Virtual Partner Active</span>
+          </div>
+        </div>
+        
+        <button 
+          onClick={() => setIsNoiseActive(!isNoiseActive)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-colors ${isNoiseActive ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-white border-slate-200 text-slate-500'}`}
+        >
+          {isNoiseActive ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          <span className="text-sm font-semibold">{isNoiseActive ? "Brown Noise ON" : "Soundscape OFF"}</span>
+        </button>
       </div>
 
-      <div className="max-w-2xl text-center flex flex-col items-center gap-12">
-        <h2 className="text-4xl md:text-5xl font-medium text-white/90 leading-tight">
-          {task.text}
-        </h2>
+      {/* Task Execution Panel */}
+      <div className="flex-1 flex flex-col items-center justify-center p-8 relative overflow-hidden">
+        {/* Subtle Confetti Container for Completion */}
+        <div className="max-w-md w-full flex flex-col items-center text-center z-10">
+            <h2 className="text-2xl font-bold text-slate-800 leading-relaxed mb-10">
+              {task.text}
+            </h2>
+            
+            <TimeSweep totalSeconds={defaultSeconds} remainingSeconds={timeLeft} />
 
-        <div className="font-mono text-8xl md:text-9xl font-black text-emerald-500 tracking-tighter drop-shadow-[0_0_40px_rgba(16,185,129,0.3)]">
-          {m.toString().padStart(2, '0')}:{s.toString().padStart(2, '0')}
-        </div>
-
-        <div className="flex gap-6 items-center">
-          <button 
-            onClick={() => setIsRunning(!isRunning)}
-            className="w-16 h-16 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
-          >
-            {isRunning ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
-          </button>
-          
-          <button 
-            onClick={onComplete}
-            className="px-8 py-5 bg-emerald-500 text-[#050505] uppercase tracking-widest font-black rounded flex items-center gap-3 hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.6)] transition-all"
-          >
-            <Check className="w-6 h-6" strokeWidth={3} />
-            Task Completed
-          </button>
+            <div className="flex gap-6 items-center mt-6">
+              <button 
+                onClick={() => setIsRunning(!isRunning)} 
+                className="w-16 h-16 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-colors"
+                aria-label={isRunning ? "Pause focus timer" : "Resume focus timer"}
+              >
+                {isRunning ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
+              </button>
+              
+              <button 
+                onClick={() => {
+                  const base = 15;
+                  const isJackpot = Math.random() < 0.15; // 15% chance for a dopamine spike jackpot
+                  const multiplier = isJackpot ? 4 : (0.8 + Math.random() * 0.4);
+                  const earned = Math.floor(base * multiplier);
+                  onComplete(earned);
+                }}
+                className="px-8 py-5 bg-teal-600 text-white font-bold rounded-2xl flex items-center gap-3 hover:bg-teal-700 shadow-md shadow-teal-600/20 transition-all"
+              >
+                <Check className="w-6 h-6" strokeWidth={3} />
+                Task Completed
+              </button>
+            </div>
         </div>
       </div>
     </motion.div>
   );
 }
 
-function PrimaryTaskItem({
-  task,
-  isActive,
-  onToggleComplete,
-  onToggleActive,
-  onDelete,
-  onSetFrog,
-  onSetEffort,
+// 3. Emergency Mode (Executive Paralysis Rescue)
+function EmergencyMode({ onClose }: { onClose: () => void }) {
+  const gentleTasks = [
+    "Drink a glass of water right now.",
+    "Take 3 deep, slow breaths.",
+    "Stand up and stretch your arms for 10 seconds.",
+    "Step outside or look out a window for 1 minute."
+  ];
+  const [task, setTask] = useState(gentleTasks[0]);
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-[200] bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
+      <LifeBuoy className="w-16 h-16 text-teal-400 mb-8 opacity-60" />
+      <h2 className="text-xl mb-6 font-medium text-slate-300">Executive function offline? That is completely okay.</h2>
+      <p className="text-3xl md:text-4xl font-bold text-white max-w-2xl leading-relaxed mb-16">{task}</p>
+      
+      <div className="flex flex-col gap-4 w-full max-w-xs">
+         <button onClick={() => setTask(gentleTasks[Math.floor(Math.random()*gentleTasks.length)])} className="py-4 border border-slate-700 rounded-2xl text-slate-400 hover:bg-slate-800 transition-colors font-medium">
+           Give me a different one
+         </button>
+         <button onClick={onClose} className="py-4 bg-teal-600 text-white font-bold rounded-2xl shadow-lg shadow-teal-600/20 hover:bg-teal-500 transition-colors">
+           I'm ready to return
+         </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// 4. Task Item Component
+function TaskCard({ 
+  task, 
+  onComplete, 
+  onDelete, 
+  onStatusChange, 
+  onEnterHyperfocus,
   onAddSubtask,
   onToggleSubtask,
-  onDeleteSubtask,
-  onEnterHyperfocus
-}: {
-  task: Task;
-  isActive: boolean;
-  onToggleComplete: () => void;
-  onToggleActive: () => void;
-  onDelete: () => void;
-  onSetFrog: () => void;
-  onSetEffort: (effort: EffortSize | null) => void;
+  onSetEffort
+}: { 
+  task: Task; 
+  onComplete: () => void; 
+  onDelete: () => void; 
+  onStatusChange: (status: 'today' | 'backlog') => void;
+  onEnterHyperfocus: () => void;
   onAddSubtask: (text: string) => void;
   onToggleSubtask: (subId: string) => void;
-  onDeleteSubtask: (subId: string) => void;
-  onEnterHyperfocus: () => void;
+  onSetEffort: (effort: EffortSize | null) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const [subInput, setSubInput] = useState('');
 
   const submitSubtask = (e: React.FormEvent) => {
@@ -159,499 +276,437 @@ function PrimaryTaskItem({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className={`group bg-white/5 border-l-4 p-4 md:p-6 flex flex-col transition-all cursor-default ${
-        task.isFrog ? 'border-emerald-500 bg-emerald-500/5 shadow-[0_0_20px_rgba(16,185,129,0.05)]' :
-        isActive ? 'border-white/50 bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.05)]' : 
-        'border-emerald-500/20 hover:border-emerald-500/40 cursor-pointer'
-      }`}
-      onClick={!isActive ? onToggleActive : undefined}
+      className={`bg-white rounded-2xl p-5 shadow-sm border ${task.status === 'today' ? 'border-teal-100 hover:border-teal-200' : 'border-slate-100 hover:border-slate-200'} transition-all`}
     >
-      <div className="flex justify-between items-start">
-        <div className="flex flex-col gap-1 flex-1 pr-4">
-          <div className="flex items-center gap-3">
-            {task.isFrog && <Crown className="w-4 h-4 text-emerald-500" />}
-            <span className={`text-lg font-medium transition-colors ${task.completed ? 'line-through text-white/40' : task.isFrog ? 'text-emerald-400' : 'text-white/90'}`}>
-              {task.text}
-            </span>
-          </div>
-          
-          <div className="flex items-center gap-3 mt-1">
-            {task.estimatedTime && (
-              <span className="text-[10px] font-mono tracking-widest uppercase text-emerald-500/80 bg-emerald-500/10 px-2 py-0.5 rounded">
-                size: {task.estimatedTime} ({TIME_MAP[task.estimatedTime]}m)
-              </span>
-            )}
-            {!isActive && !task.completed && (
-              <span className="text-[10px] uppercase tracking-widest text-white/40 opacity-0 transition-opacity group-hover:opacity-100">
-                Tap to expand & focus
-              </span>
-            )}
-            {task.subtasks && task.subtasks.length > 0 && !isActive && (
-              <span className="text-[10px] uppercase tracking-widest text-white/30">
-                {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length} Steps
-              </span>
-            )}
-          </div>
-        </div>
+      <div className="flex gap-4 items-start">
+        <button
+          onClick={onComplete}
+          aria-label="Complete task"
+          className="mt-1 w-7 h-7 rounded-lg border-2 border-slate-200 hover:border-teal-500 hover:bg-teal-50 flex items-center justify-center transition-colors shrink-0"
+        >
+          {task.completed && <Check className="w-4 h-4 text-teal-600" strokeWidth={3} />}
+        </button>
         
-        <div className="flex items-center gap-2">
-          {isActive && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onSetFrog(); }}
-              className={`p-2 transition-colors rounded ${task.isFrog ? 'text-emerald-500 bg-emerald-500/10' : 'text-white/30 hover:text-emerald-400 hover:bg-white/5'}`}
-              title="Pin as daily priority"
-            >
-              <Crown className="w-4 h-4" />
-            </button>
-          )}
-          {isActive && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="p-2 text-white/30 hover:text-red-400 transition-colors rounded hover:bg-white/5"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
+        <div className="flex-1 flex flex-col cursor-pointer" onClick={() => setExpanded(!expanded)}>
+           <span className="text-lg font-bold text-slate-800 leading-snug">{task.text}</span>
+           <div className="flex items-center gap-3 mt-2">
+             {task.estimatedTime && (
+               <span className="text-xs font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-md">
+                 {task.estimatedTime} ({TIME_MAP[task.estimatedTime]}m)
+               </span>
+             )}
+             {task.subtasks && task.subtasks.length > 0 && (
+               <span className="text-xs font-medium text-slate-400">
+                 {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length} subtasks
+               </span>
+             )}
+             {!expanded && <span className="text-xs text-slate-300 ml-auto mr-2">Tap to expand</span>}
+           </div>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={(e) => { e.stopPropagation(); onToggleComplete(); }}
-            className={`w-8 h-8 rounded border flex items-center justify-center transition-colors shrink-0 ml-2 ${
-              task.completed ? 'bg-emerald-500 border-emerald-500' : 'border-white/20 hover:bg-emerald-500 hover:border-emerald-500 group-hover:border-white/40'
-            }`}
+            onClick={(e) => { e.stopPropagation(); onStatusChange(task.status === 'today' ? 'backlog' : 'today'); }}
+            className="p-2 text-slate-400 hover:text-slate-700 transition-colors rounded-lg hover:bg-slate-50"
+            title={task.status === 'today' ? "Move to Archive" : "Move to Today"}
           >
-            {task.completed ? (
-              <Check className="w-4 h-4 text-[#050505]" strokeWidth={3} />
-            ) : (
-              <div className="w-3 h-3 border-2 border-white/20 rounded-sm"></div>
-            )}
+            {task.status === 'today' ? <ArrowDown className="w-5 h-5" /> : <ArrowUp className="w-5 h-5" />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+            title="Delete task"
+          >
+            <Trash2 className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      {isActive && !task.completed && (
-        <motion.div 
-          initial={{ height: 0, opacity: 0 }} 
-          animate={{ height: 'auto', opacity: 1 }} 
-          className="mt-6 flex flex-col gap-6 border-t border-white/10 pt-6 overflow-hidden"
-        >
-          
-          {/* Hyperfocus Button */}
-          <button 
-            onClick={onEnterHyperfocus}
-            className="w-full py-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500 hover:text-[#050505] transition-all flex items-center justify-center gap-3 rounded text-xs font-bold tracking-[0.2em] uppercase"
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden mt-6 pt-5 border-t border-slate-100 flex flex-col gap-5"
           >
-            <Maximize2 className="w-4 h-4" /> Enter Hyperfocus
-          </button>
+            <button 
+              onClick={onEnterHyperfocus}
+              className="w-full py-4 bg-teal-50 text-teal-700 font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-teal-100 transition-colors"
+            >
+              <Maximize2 className="w-5 h-5" /> Start Focus Room Session
+            </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Sizing */}
-            <div className="flex flex-col gap-3">
-              <span className="text-[10px] uppercase font-black tracking-[0.2em] text-white/40"><Clock className="w-3 h-3 inline mr-1" /> Estimate Size</span>
-              <div className="flex gap-2">
-                {(['short', 'medium', 'deep'] as EffortSize[]).map(size => (
-                  <button
-                    key={size}
-                    onClick={() => onSetEffort(task.estimatedTime === size ? null : size)}
-                    className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest rounded border transition-colors ${
-                      task.estimatedTime === size ? 'bg-white text-black border-white' : 'border-white/10 text-white/50 hover:border-white/30'
-                    }`}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Subtasks (Breakdown) */}
-            <div className="flex flex-col gap-3">
-              <span className="text-[10px] uppercase font-black tracking-[0.2em] text-white/40">Task Breakdown</span>
-              <div className="flex flex-col gap-2">
-                {task.subtasks?.map(sub => (
-                  <div key={sub.id} className="flex items-start gap-3 group/sub">
-                    <button 
-                      onClick={() => onToggleSubtask(sub.id)}
-                      className={`mt-0.5 w-4 h-4 rounded-sm border flex shrink-0 items-center justify-center ${sub.completed ? 'bg-emerald-500 border-emerald-500 text-black' : 'border-white/20 hover:border-white/50'}`}
-                    >
-                      {sub.completed && <Check className="w-3 h-3" strokeWidth={3} />}
-                    </button>
-                    <span className={`text-sm flex-1 break-words ${sub.completed ? 'text-white/30 line-through' : 'text-white/80'}`}>{sub.text}</span>
-                    <button onClick={() => onDeleteSubtask(sub.id)} className="opacity-0 group-hover/sub:opacity-100 text-white/20 hover:text-red-400 p-1">
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+               {/* Subtasks (Micro-steps) */}
+               <div className="flex flex-col gap-3">
+                  <span className="text-sm font-bold text-slate-600">Break it down</span>
+                  <div className="flex flex-col gap-2">
+                    {task.subtasks?.map(sub => (
+                       <div key={sub.id} className="flex items-start gap-3">
+                         <button onClick={() => onToggleSubtask(sub.id)} className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${sub.completed ? 'border-teal-500 bg-teal-500' : 'border-slate-300 hover:border-slate-400'}`}>
+                           {sub.completed && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                         </button>
+                         <span className={`text-base ${sub.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{sub.text}</span>
+                       </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <form onSubmit={submitSubtask} className="flex mt-1">
-                <input
-                  type="text"
-                  placeholder="Drop a micro-step..."
-                  value={subInput}
-                  onChange={e => setSubInput(e.target.value)}
-                  className="bg-transparent border-b border-white/20 pb-2 text-sm text-white focus:outline-none focus:border-emerald-500 w-full placeholder:text-white/20"
-                />
-              </form>
+                  <form onSubmit={submitSubtask} className="flex mt-2">
+                    <input
+                      type="text"
+                      placeholder="Add a micro-step..."
+                      value={subInput}
+                      onChange={e => setSubInput(e.target.value)}
+                      className="bg-transparent border-b border-slate-200 pb-2 text-base text-slate-700 focus:outline-none focus:border-teal-500 w-full placeholder:text-slate-400"
+                    />
+                  </form>
+               </div>
+
+               {/* Time Sizing */}
+               <div className="flex flex-col gap-3">
+                  <span className="text-sm font-bold text-slate-600">Estimate Effort</span>
+                  <div className="flex flex-col gap-2">
+                    {(['short', 'medium', 'deep'] as EffortSize[]).map(size => (
+                      <button
+                        key={size}
+                        onClick={() => onSetEffort(task.estimatedTime === size ? null : size)}
+                        className={`py-3 px-4 font-semibold text-sm rounded-xl border text-left transition-colors ${
+                          task.estimatedTime === size ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        {size.charAt(0).toUpperCase() + size.slice(1)} Task ({TIME_MAP[size]} mins)
+                      </button>
+                    ))}
+                  </div>
+               </div>
             </div>
-          </div>
-        </motion.div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
 
-function SecondaryTaskItem({
-  task,
-  onToggleComplete,
-  onDelete
-}: {
-  task: Task;
-  onToggleComplete: () => void;
-  onDelete: () => void;
-}) {
-  const ageMs = Date.now() - task.createdAt;
-  const ageHrs = ageMs / (1000 * 60 * 60);
+// 5. Visual Achievement Garden Component
+function VisualGarden({ sunlight }: { sunlight: number }) {
+  // Convert sunlight into plants (1 plant per 30 sunlight, max 10 plants displayed)
+  const plantCount = Math.min(Math.floor(sunlight / 30), 10);
+  const elements = [];
   
-  const isAging = ageHrs > 24;
+  for (let i = 0; i < plantCount; i++) {
+    // Alternate plant types for visual variety
+    if (i % 3 === 0) {
+      elements.push(<TreePine key={i} className="text-teal-600 w-8 h-8 drop-shadow-sm" />);
+    } else if (i % 2 === 0) {
+      elements.push(<Flower2 key={i} className="text-pink-400 w-6 h-6 mb-1 drop-shadow-sm" />);
+    } else {
+      elements.push(<Sprout key={i} className="text-teal-400 w-5 h-5 mb-1" />);
+    }
+  }
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className={`p-4 border rounded flex flex-col transition-colors group ${
-        isAging ? 'bg-[#0a0a0a] border-white/5 opacity-60' : 'bg-white/5 border-white/5 hover:border-white/10 hover:bg-white/10'
-      }`}
-    >
-      <div className="flex justify-between items-center">
-        <span className={`text-sm flex-1 break-words pr-2 ${task.completed ? 'line-through text-white/20' : isAging ? 'text-white/40' : 'text-white/60'}`}>
-          {task.text}
-        </span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onDelete}
-            className="opacity-0 group-hover:opacity-100 p-1.5 text-white/30 hover:text-red-400 transition-colors"
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
-          <button
-            onClick={onToggleComplete}
-            className={`w-6 h-6 rounded flex items-center justify-center transition-colors shrink-0 ${
-              task.completed ? 'bg-amber-500 border border-amber-500 text-[#050505]' : 'border-[1.5px] border-white/20 hover:border-amber-500'
-            }`}
-          >
-            {task.completed && <Check className="w-4 h-4" strokeWidth={3} />}
-          </button>
-        </div>
-      </div>
-      
-      {!task.completed && isAging && (
-        <div className="mt-3 text-[9px] uppercase tracking-widest font-bold text-amber-500/50 flex items-center gap-1">
-          <AlertCircle className="w-3 h-3" /> Fading: Pending Auto-Purge
-        </div>
-      )}
-    </motion.div>
+    <div className="flex items-end gap-3 h-10 px-4 min-w-[200px]">
+      <AnimatePresence>
+        {elements.length > 0 ? (
+          elements.map((el, i) => (
+            <motion.div
+              key={i}
+              initial={{ scale: 0, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              transition={{ type: 'spring', damping: 12 }}
+            >
+              {el}
+            </motion.div>
+          ))
+        ) : (
+          <span className="text-sm font-medium text-slate-400 pb-1">Complete tasks to grow your garden</span>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
+
 
 // --- Main Application ---
-
 export default function App() {
-  const [primaryTasks, setPrimaryTasks] = useLocalStorage<Task[]>('primaryTasks', []);
-  const [secondaryTasks, setSecondaryTasks] = useLocalStorage<Task[]>('secondaryTasks', []);
-  const [activeTaskId, setActiveTaskId] = useLocalStorage<string | null>('activeTaskId', null);
-  const [ghostMode, setGhostMode] = useLocalStorage('ghostMode', false);
+  const [tasks, setTasks] = useLocalStorage<Task[]>('ff_v2_tasks', []);
+  const [sunlight, setSunlight] = useLocalStorage<number>('ff_v2_sunlight', 0);
+  
+  const [captureInput, setCaptureInput] = useState('');
   const [hyperfocusTask, setHyperfocusTask] = useState<Task | null>(null);
+  const [emergencyMode, setEmergencyMode] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
-  const [primaryInput, setPrimaryInput] = useState('');
-  const [secondaryInput, setSecondaryInput] = useState('');
-
-  // Dump Bankruptcy Auto-Purge
+  // Auto-purge backlog items older than 48h
   useEffect(() => {
+    const purgeThreshold = BANKRUPTCY_HR * 60 * 60 * 1000;
     const interval = setInterval(() => {
       const now = Date.now();
-      setSecondaryTasks(prev => prev.filter(t => t.completed || (now - t.createdAt) < BANKRUPTCY_MS));
-    }, 60 * 1000); // Check every minute
+      setTasks(prev => prev.filter(t => t.completed || (now - t.createdAt) < purgeThreshold));
+    }, 60 * 1000); 
     return () => clearInterval(interval);
-  }, [setSecondaryTasks]);
+  }, [setTasks]);
 
-  // Handlers - Primary
-  const addPrimary = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!primaryInput.trim()) return;
-    const newTask: Task = { id: crypto.randomUUID(), text: primaryInput.trim(), completed: false, createdAt: Date.now(), subtasks: [] };
-    setPrimaryTasks(prev => [newTask, ...prev]);
-    setPrimaryInput('');
-    if (!activeTaskId) setActiveTaskId(newTask.id);
-  };
-
-  const togglePrimaryComplete = (id: string) => {
-    setPrimaryTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed, isFrog: false } : t));
-    if (activeTaskId === id) setActiveTaskId(null);
-  };
-
-  const deletePrimary = (id: string) => {
-    setPrimaryTasks(prev => prev.filter(t => t.id !== id));
-    if (activeTaskId === id) setActiveTaskId(null);
-  };
-
-  const setFrog = (id: string) => {
-    setPrimaryTasks(prev => prev.map(t => ({ ...t, isFrog: t.id === id ? !t.isFrog : false })));
-  };
-
-  const setEffort = (id: string, effort: EffortSize | null) => {
-    setPrimaryTasks(prev => prev.map(t => t.id === id ? { ...t, estimatedTime: effort } : t));
-  };
-
-  const addSubtask = (taskId: string, text: string) => {
-    setPrimaryTasks(prev => prev.map(t => {
-      if (t.id !== taskId) return t;
-      const subs = t.subtasks || [];
-      return { ...t, subtasks: [...subs, { id: crypto.randomUUID(), text, completed: false }] };
-    }));
-  };
-
-  const toggleSubtask = (taskId: string, subId: string) => {
-    setPrimaryTasks(prev => prev.map(t => {
-      if (t.id !== taskId) return t;
-      return { ...t, subtasks: t.subtasks?.map(s => s.id === subId ? { ...s, completed: !s.completed } : s) };
-    }));
-  };
-
-  const deleteSubtask = (taskId: string, subId: string) => {
-    setPrimaryTasks(prev => prev.map(t => {
-      if (t.id !== taskId) return t;
-      return { ...t, subtasks: t.subtasks?.filter(s => s.id !== subId) };
-    }));
-  };
-
-  const handleHyperfocusComplete = () => {
-    if (hyperfocusTask) {
-      togglePrimaryComplete(hyperfocusTask.id);
+  // Voice recording logic via Web Speech API
+  const handleMicClick = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Your browser doesn't support the raw Speech Recognition API.");
+      return;
     }
-    setHyperfocusTask(null);
+    const recognition = new SpeechRecognition();
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    
+    recognition.onresult = (e: any) => {
+      const transcript = Array.from(e.results).map((r: any) => r[0].transcript).join('');
+      setCaptureInput(transcript);
+    };
+    
+    if (!isListening) {
+      recognition.start();
+    } else {
+      recognition.stop();
+    }
   };
 
-  // Handlers - Secondary
-  const addSecondary = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!secondaryInput.trim()) return;
-    const newTask: Task = { id: crypto.randomUUID(), text: secondaryInput.trim(), completed: false, createdAt: Date.now() };
-    setSecondaryTasks(prev => [newTask, ...prev]);
-    setSecondaryInput('');
+  // The AI Compiler Mock & Capture
+  const handleCapture = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!captureInput.trim()) return;
+    
+    // Simulate natural language parsing for multiple tasks (e.g. separated by "and", "then", or ",")
+    const phrases = captureInput.split(/(?:\band\b|\bthen\b|,)/i).map(s => s.trim()).filter(s => s.length > 2);
+    
+    // The Rule of Three/Five Constraint
+    let todayCount = tasks.filter(t => !t.completed && t.status === 'today').length;
+    
+    const newTasks: Task[] = phrases.map((text) => {
+      let assignedStatus: 'today' | 'backlog' = 'today';
+      if (todayCount >= 5) {
+        assignedStatus = 'backlog';
+      } else {
+        todayCount++;
+      }
+      
+      return {
+        id: crypto.randomUUID(),
+        text: text.charAt(0).toUpperCase() + text.slice(1),
+        completed: false,
+        createdAt: Date.now(),
+        status: assignedStatus,
+        subtasks: []
+      };
+    });
+    
+    setTasks(prev => [...newTasks, ...prev]);
+    setCaptureInput('');
   };
 
-  const toggleSecondaryComplete = (id: string) => {
-    setSecondaryTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  // Operations
+  const completeTask = (id: string, extraReward: number = 0) => {
+    let reward = extraReward;
+    if (reward === 0) {
+      // Base variable ratio logic if not coming from hyperfocus multiplier
+      reward = Math.floor(15 * (Math.random() < 0.15 ? 4 : (0.8 + Math.random() * 0.4)));
+    }
+    setSunlight(prev => prev + reward);
+    
+    // Auto remove completed tasks after a brief delay for UI satisfaction
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true } : t));
+    setTimeout(() => {
+      setTasks(prev => prev.filter(t => t.id !== id));
+    }, 2000);
   };
 
-  const deleteSecondary = (id: string) => {
-    setSecondaryTasks(prev => prev.filter(t => t.id !== id));
-  };
-
-  // Computations
-  const activeTasks = [...primaryTasks.filter(t => !t.completed)].sort((a, b) => (a.isFrog === b.isFrog ? 0 : a.isFrog ? -1 : 1));
-  const completedTasks = primaryTasks.filter(t => t.completed);
-
-  const totalMinutes = activeTasks.reduce((acc, t) => acc + (t.estimatedTime ? TIME_MAP[t.estimatedTime] : 0), 0);
-  const hours = Math.floor(totalMinutes / 60);
-  const mins = totalMinutes % 60;
-  const timeEstimateStr = totalMinutes > 0 ? `${hours > 0 ? `${hours}h ` : ''}${mins}m` : '0m';
+  const activeToday = tasks.filter(t => !t.completed && t.status === 'today').sort((a,b) => b.createdAt - a.createdAt);
+  const activeBacklog = tasks.filter(t => !t.completed && t.status === 'backlog').sort((a,b) => b.createdAt - a.createdAt);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-slate-100 font-sans p-4 md:p-8 flex flex-col gap-6 selection:bg-emerald-500/30 w-full overflow-x-hidden">
+    <div className="min-h-screen pb-24 w-full overflow-x-hidden selection:bg-teal-200">
       
       <AnimatePresence>
         {hyperfocusTask && (
           <HyperfocusOverlay 
             task={hyperfocusTask} 
             onClose={() => setHyperfocusTask(null)} 
-            onComplete={handleHyperfocusComplete} 
+            onComplete={(reward) => {
+              completeTask(hyperfocusTask.id, reward);
+              setHyperfocusTask(null);
+            }} 
           />
+        )}
+        {emergencyMode && (
+          <EmergencyMode onClose={() => setEmergencyMode(false)} />
         )}
       </AnimatePresence>
 
-      {/* Header Section */}
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/10 pb-6 gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-emerald-500 rounded-sm flex items-center justify-center">
-            <div className="w-4 h-4 bg-[#050505]"></div>
-          </div>
-          <h1 className="text-xl font-bold tracking-tight uppercase">FocusFlow <span className="text-emerald-500">ADHD</span></h1>
-        </div>
-
-        <div className="flex items-center gap-4 md:gap-8 flex-wrap">
-          {totalMinutes > 0 && (
-            <div className="hidden sm:flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/10">
-              <Clock className="w-3 h-3 text-emerald-500" />
-              <span className="text-[10px] font-mono uppercase tracking-widest text-white/50">Total Workload: <span className="text-emerald-400 font-bold">{timeEstimateStr}</span></span>
-            </div>
-          )}
-
-          {/* Ghost Mode Toggle */}
-          <div 
-            onClick={() => setGhostMode(!ghostMode)}
-            className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/20 cursor-pointer hover:bg-white/10 transition-colors"
-          >
-            <span className="text-[10px] uppercase font-bold tracking-tighter opacity-50">Ghost Mode</span>
-            <button className={`w-10 h-5 rounded-full relative transition-colors ${ghostMode ? 'bg-emerald-600' : 'bg-white/10'}`}>
-              <motion.div 
-                layout
-                className="absolute top-1 w-3 h-3 bg-white rounded-full"
-                initial={false}
-                animate={{ right: ghostMode ? '4px' : '24px' }}
-              />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Layout Grid */}
-      <main className="grid grid-cols-1 md:grid-cols-12 gap-8 flex-1">
-        
-        {/* Primary Column */}
-        <motion.section
-          layout
-          className={`flex flex-col gap-4 ${ghostMode ? 'md:col-span-12 md:max-w-3xl md:mx-auto w-full' : 'md:col-span-7'}`}
-        >
-          <div className="flex justify-between items-end mb-2">
-            <h2 className="text-xs font-black uppercase tracking-[0.2em] text-emerald-500">Active Primary Tasks</h2>
-            <span className="text-[10px] text-white/40 uppercase">{activeTasks.length} Items</span>
-          </div>
-
-          <form onSubmit={addPrimary} className="mb-2">
-            <input
-              type="text"
-              placeholder="Add new primary focus..."
-              value={primaryInput}
-              onChange={(e) => setPrimaryInput(e.target.value)}
-              className="w-full bg-[#111] border border-white/10 p-4 text-sm focus:border-emerald-500 outline-none text-white placeholder:text-white/30 transition-colors"
-            />
-          </form>
-
-          <div className="flex flex-col gap-3">
-            <AnimatePresence>
-              {activeTasks.length === 0 && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="py-12 flex justify-center items-center h-full border border-dashed border-white/10 text-white/30 text-xs uppercase tracking-widest"
-                >
-                  Your focus list is clear.
-                </motion.div>
-              )}
-              {activeTasks.map(task => (
-                <PrimaryTaskItem
-                  key={task.id}
-                  task={task}
-                  isActive={activeTaskId === task.id}
-                  onToggleComplete={() => togglePrimaryComplete(task.id)}
-                  onToggleActive={() => setActiveTaskId(activeTaskId === task.id ? null : task.id)}
-                  onDelete={() => deletePrimary(task.id)}
-                  onSetFrog={() => setFrog(task.id)}
-                  onSetEffort={(eff) => setEffort(task.id, eff)}
-                  onAddSubtask={(t) => addSubtask(task.id, t)}
-                  onToggleSubtask={(subId) => toggleSubtask(task.id, subId)}
-                  onDeleteSubtask={(subId) => deleteSubtask(task.id, subId)}
-                  onEnterHyperfocus={() => setHyperfocusTask(task)}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-
-          {/* Completed Primary Tasks */}
-          {completedTasks.length > 0 && (
-            <div className="mt-8 border-t border-white/10 pt-6">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-4">Completed Focus</h3>
-              <div className="flex flex-col gap-2 opacity-60 hover:opacity-100 transition-opacity">
-                <AnimatePresence>
-                  {completedTasks.map(task => (
-                    <div key={task.id} className="flex items-center justify-between p-4 bg-white/5 border-l-4 border-emerald-500/20">
-                      <span className="text-sm line-through text-white/40 flex-1">{task.text}</span>
-                      <div className="flex gap-2">
-                        <button onClick={() => deletePrimary(task.id)} className="text-white/20 hover:text-red-400 p-2"><Trash2 className="w-4 h-4" /></button>
-                        <button onClick={() => togglePrimaryComplete(task.id)} className="w-8 h-8 bg-emerald-500 rounded flex items-center justify-center shrink-0"><Check className="w-4 h-4 text-black" strokeWidth={3} /></button>
-                      </div>
-                    </div>
-                  ))}
-                </AnimatePresence>
+      <div className="max-w-4xl mx-auto px-4 md:px-8 pt-8">
+        {/* Header Ribbon with Integrated Garden */}
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 bg-white p-4 rounded-3xl shadow-sm border border-slate-100 gap-4">
+           <div className="flex flex-col">
+             <div className="flex items-center gap-3 mb-2">
+               <div className="w-10 h-10 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600">
+                 <Sun className="w-6 h-6" />
+               </div>
+               <div>
+                  <h1 className="text-xl font-bold text-slate-800">FocusFlow</h1>
+               </div>
+             </div>
+             
+             {/* The Interactive Plant Visualization */}
+             <div className="flex items-center">
+                <VisualGarden sunlight={sunlight} />
+             </div>
+           </div>
+           
+           <div className="flex items-center gap-4">
+              <div className="flex flex-col items-end mr-2">
+                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Sunlight Gathered</span>
+                 <div className="flex items-center gap-2">
+                   <Sun className="w-4 h-4 text-amber-500" />
+                   <span className="font-bold text-amber-600 text-xl">{sunlight}</span>
+                 </div>
               </div>
-            </div>
-          )}
-        </motion.section>
+              <div className="w-px h-10 bg-slate-100"></div>
+              <button 
+                onClick={() => setEmergencyMode(true)}
+                className="w-12 h-12 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-red-500 transition-colors shadow-sm"
+                title="Bad Brain Day Rescue"
+              >
+                <LifeBuoy className="w-6 h-6" />
+              </button>
+           </div>
+        </header>
 
-        {/* Secondary Column (Brain Dump) */}
-        <AnimatePresence>
-          {!ghostMode && (
-            <motion.section
-              layout
-              initial={{ opacity: 0, filter: 'blur(8px)', x: 20 }}
-              animate={{ opacity: 1, filter: 'blur(0px)', x: 0 }}
-              exit={{ opacity: 0, filter: 'blur(8px)', x: 20, scale: 0.95 }}
-              transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-              className="md:col-span-5 md:border-l md:border-white/10 md:pl-8 flex flex-col gap-4"
-            >
-              <div className="flex justify-between items-end mb-2">
-                <h2 className="text-xs font-black uppercase tracking-[0.2em] text-amber-500">Brain Dump</h2>
-                <span className="text-[10px] text-white/40 uppercase">Auto-purges after 48h</span>
+        {/* Phase 1: The Frictionless Voice/Text Dump */}
+        <section className="mb-16">
+           <form onSubmit={handleCapture} className={`relative shadow-sm rounded-[2rem] bg-white border p-2 overflow-hidden transition-all ${isListening ? 'ring-4 ring-rose-500/20 border-rose-200' : 'focus-within:ring-4 ring-teal-500/20 border-slate-100'}`}>
+             <input
+               type="text"
+               placeholder="What is buzzing in your head?"
+               value={captureInput}
+               onChange={(e) => setCaptureInput(e.target.value)}
+               className="w-full bg-transparent p-6 pr-20 text-xl font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none"
+             />
+             <button 
+                type="button" 
+                onClick={handleMicClick}
+                className={`absolute right-4 top-1/2 -translate-y-1/2 w-14 h-14 rounded-2xl flex items-center justify-center transition-colors shadow-md ${
+                  isListening 
+                  ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/30 animate-pulse' 
+                  : 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20'
+                }`}
+                title="Voice Dictation"
+             >
+                <Mic className="w-6 h-6" />
+             </button>
+           </form>
+           {captureInput.length > 0 && !isListening && (
+              <motion.button 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                onClick={(e: any) => handleCapture(e)}
+                className="mt-4 px-6 py-3 bg-slate-800 text-white rounded-xl shadow-md font-semibold text-sm hover:bg-slate-700 border border-slate-700 w-full"
+              >
+                Process Thoughts (Hit Enter)
+              </motion.button>
+           )}
+        </section>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+           
+           {/* Primary: Must-Do Today (Limited) */}
+           <section className="lg:col-span-7 flex flex-col gap-6">
+              <div className="flex items-baseline justify-between pl-2">
+                 <h2 className="text-xl font-bold text-slate-800">Today's Focus</h2>
+                 <span className="text-sm font-semibold text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200">
+                   {activeToday.length} / 5 Max
+                 </span>
               </div>
-
-              <div className="flex flex-col gap-2">
-                <AnimatePresence>
-                  {secondaryTasks.filter(t => !t.completed).length === 0 && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="py-8 flex justify-center items-center border border-dashed border-white/10 text-white/30 text-xs uppercase tracking-widest"
-                    >
-                      Mind is clear.
-                    </motion.div>
-                  )}
-                  {secondaryTasks.filter(t => !t.completed).map(task => (
-                    <SecondaryTaskItem
-                      key={task.id}
-                      task={task}
-                      onToggleComplete={() => toggleSecondaryComplete(task.id)}
-                      onDelete={() => deleteSecondary(task.id)}
-                    />
-                  ))}
-                </AnimatePresence>
-              </div>
-
-              <div className="mt-auto pt-4 border-t border-white/10">
-                <form onSubmit={addSecondary} className="relative group flex flex-col">
-                  <input
-                    type="text"
-                    placeholder="Dump distracting thought..."
-                    value={secondaryInput}
-                    onChange={(e) => setSecondaryInput(e.target.value)}
-                    className="w-full bg-[#111] border border-white/10 p-4 text-sm focus:border-amber-500 outline-none text-white placeholder:text-white/30 transition-colors"
-                  />
-                </form>
-              </div>
-
-              {/* Completed Secondary Tasks */}
-              {secondaryTasks.some(t => t.completed) && (
-                <div className="mt-4 border-white/10">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-3">Dumped & Done</h3>
-                  <div className="flex flex-col gap-2 opacity-50 hover:opacity-100 transition-opacity">
-                    <AnimatePresence>
-                      {secondaryTasks.filter(t => t.completed).map(task => (
-                         <div key={task.id} className="flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded">
-                           <span className="text-sm line-through text-white/30 flex-1">{task.text}</span>
-                           <div className="flex gap-2">
-                             <button onClick={() => deleteSecondary(task.id)} className="text-white/20 hover:text-red-400 p-1"><Trash2 className="w-3 h-3" /></button>
-                             <button onClick={() => toggleSecondaryComplete(task.id)} className="w-6 h-6 bg-amber-500 rounded flex items-center justify-center shrink-0"><Check className="w-3 h-3 text-black" strokeWidth={3} /></button>
-                           </div>
-                         </div>
-                      ))}
-                    </AnimatePresence>
-                  </div>
+              
+              {activeToday.length === 0 && (
+                <div className="p-10 border-2 border-dashed border-slate-200 rounded-[2rem] text-center flex flex-col items-center justify-center gap-4 text-slate-400 bg-white/50">
+                   <Target className="w-10 h-10 opacity-50" />
+                   <p className="font-medium text-lg">Your focus board is perfectly clear.</p>
                 </div>
               )}
-            </motion.section>
-          )}
-        </AnimatePresence>
-      </main>
 
+              <AnimatePresence>
+                {activeToday.map(task => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onComplete={() => completeTask(task.id)}
+                    onDelete={() => setTasks(prev => prev.filter(t => t.id !== task.id))}
+                    onStatusChange={(status) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, status} : t))}
+                    onEnterHyperfocus={() => setHyperfocusTask(task)}
+                    onAddSubtask={(str) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: [...(t.subtasks||[]), {id: crypto.randomUUID(), text: str, completed: false}]} : t))}
+                    onToggleSubtask={(subId) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: t.subtasks?.map(s => s.id === subId ? {...s, completed: !s.completed} : s)} : t))}
+                    onSetEffort={(eff) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, estimatedTime: eff} : t))}
+                  />
+                ))}
+              </AnimatePresence>
+           </section>
+
+           {/* Secondary: The Archive / Backlog */}
+           <section className="lg:col-span-5 flex flex-col gap-6">
+              <div className="flex items-baseline justify-between pl-2">
+                 <h2 className="text-xl font-bold text-slate-800">The Archive</h2>
+                 <span className="text-sm font-semibold text-slate-400">
+                   Auto-purges
+                 </span>
+              </div>
+
+              <div className="bg-slate-100 rounded-[2rem] p-6 flex flex-col gap-4 border border-slate-200 shadow-inner">
+                {activeBacklog.length === 0 && (
+                  <p className="text-center font-medium text-slate-400 py-8">No overflowing thoughts.</p>
+                )}
+                
+                <AnimatePresence>
+                  {activeBacklog.map(task => (
+                    <motion.div
+                      key={task.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-start gap-4 group hover:border-slate-300 transition-colors"
+                    >
+                      <button onClick={() => completeTask(task.id)} className="mt-0.5 w-6 h-6 rounded-lg border-2 border-slate-200 hover:border-amber-500 hover:bg-amber-50 flex items-center justify-center shrink-0">
+                         {task.completed && <Check className="w-3 h-3 text-amber-600" strokeWidth={3} />}
+                      </button>
+                      <span className="text-base font-semibold text-slate-600 flex-1 leading-snug">{task.text}</span>
+                      
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => {
+                            if (activeToday.length < 5) setTasks(prev => prev.map(t => t.id === task.id ? {...t, status: 'today'} : t));
+                            else alert("Clear some focus tasks first to prevent overwhelm.");
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-teal-600 bg-slate-50 hover:bg-teal-50 rounded-lg"
+                          title="Move to Today"
+                        >
+                          <ArrowUp className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => setTasks(prev => prev.filter(t => t.id !== task.id))}
+                          className="p-1.5 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-lg"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+           </section>
+
+        </div>
+      </div>
     </div>
   );
 }
