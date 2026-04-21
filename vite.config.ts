@@ -13,6 +13,7 @@ export default defineConfig({
       includeAssets: ['icon.svg'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,json,ico}'],
+        navigateFallbackDenylist: [/^\/api/]
       },
       manifest: {
         name: 'FocusFlow: ADHD Manager',

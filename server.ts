@@ -90,6 +90,27 @@ async function startServer() {
     }
   });
 
+  // Google Calendar Proxy
+  app.get('/api/calendar/events', async (req, res) => {
+    const token = req.headers.authorization;
+    if (!token) return res.status(401).json({ error: "Missing authorization" });
+
+    try {
+      const start = req.query.timeMin;
+      const end = req.query.timeMax;
+      
+      const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&singleEvents=true&orderBy=startTime`, {
+        headers: { 'Authorization': token as string }
+      });
+
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } catch (err) {
+       console.error("Calendar proxy error:", err);
+       res.status(500).json({ error: "Failed to fetch from Google", details: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Vite Integration for the SPA
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

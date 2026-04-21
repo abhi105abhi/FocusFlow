@@ -814,22 +814,34 @@ export default function App() {
       const end = new Date();
       end.setHours(23,59,59,999);
       
-      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start.toISOString()}&timeMax=${end.toISOString()}&singleEvents=true&orderBy=startTime`, {
+      const res = await fetch(`/api/calendar/events?timeMin=${encodeURIComponent(start.toISOString())}&timeMax=${encodeURIComponent(end.toISOString())}`, {
         headers: { 'Authorization': `Bearer ${calendarToken.access_token}` }
       });
       if (res.status === 401) {
          setCalendarToken(null);
          throw new Error("Token expired");
       }
-      const data = await res.json();
+      
+      const text = await res.text();
+      let data;
+      try {
+         data = JSON.parse(text);
+      } catch (e) {
+         console.error("Invalid JSON from calendar fetch:", text);
+         return;
+      }
+
       if (!res.ok) {
          console.error("Calendar API Error:", data);
-         alert(`Calendar Sync Error: ${data.error?.message || "Verify Google Calendar API is enabled in GCP."}`);
+         alert(`Calendar Sync Error: ${data.message || data.error?.message || data.error || "Verify Google Calendar API is enabled in GCP."}`);
          return;
       }
       setCalendarEvents(data.items || []);
     } catch (err) {
-      console.error(err);
+      console.error("Calendar fetch error:", err);
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+         alert("Network Error: Failed to fetch calendar (Adblocker or offline). Proxy should prevent this.");
+      }
     } finally {
       setIsLoadingCalendar(false);
     }
@@ -837,8 +849,21 @@ export default function App() {
 
   const handleConnectCalendar = async () => {
     try {
+      console.log("Fetching /api/auth/url");
       const res = await fetch('/api/auth/url');
-      const data = await res.json();
+      console.log("Response status:", res.status);
+      
+      const text = await res.text();
+      console.log("Response text:", text);
+      
+      let data;
+      try {
+         data = JSON.parse(text);
+      } catch (e) {
+         console.error("Failed to parse JSON from /api/auth/url", text);
+         alert("Invalid response from server");
+         return;
+      }
       
       if (!res.ok) {
          alert(data.message || "Failed to set up Google Calendar sync.");
@@ -847,8 +872,8 @@ export default function App() {
       
       window.open(data.url, 'oauth_popup', 'width=600,height=700');
     } catch (err) {
-      console.error(err);
-      alert("Failed to connect to backend server.");
+      console.error("handleConnectCalendar fetch error:", err);
+      alert(`Network error connecting to backend: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
