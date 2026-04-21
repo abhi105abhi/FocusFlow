@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, Check, Clock, Maximize2, Play, Pause, Minimize2, Sun, LifeBuoy, ArrowDown, ArrowUp, Trash2, Volume2, VolumeX, Sprout, TreePine, Flower2, Target, Flame, Activity, Plus, Settings2, X, Dices, Inbox, Zap, Loader2, Sparkles, Calendar as CalendarIcon, Bell, RefreshCw } from 'lucide-react';
-import { GoogleGenAI, Type } from '@google/genai';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types ---
@@ -10,6 +9,12 @@ interface Subtask {
   id: string;
   text: string;
   completed: boolean;
+}
+
+interface RecurringConfig {
+  frequency: 'daily' | 'weekly' | 'monthly';
+  dayOfWeek?: number; // 0-6 (0 is Sunday)
+  dateOfMonth?: number; // 1-31
 }
 
 interface Task {
@@ -22,6 +27,8 @@ interface Task {
   estimatedTime?: EffortSize | null;
   subtasks?: Subtask[];
   dependencies?: string[];
+  recurring?: RecurringConfig | null;
+  showAfter?: number;
 }
 
 interface Habit {
@@ -31,6 +38,7 @@ interface Habit {
   tiers: { mini: string; plus: string; elite: string };
   momentum: number;
   lastLoggedAt: number;
+  history?: string[];
 }
 
 interface Category {
@@ -393,7 +401,7 @@ function HabitFormOverlay({
 
 // 4. Task Item Component
 function TaskCard({ 
-  task, availableTasks, onComplete, onDelete, onStatusChange, onEnterHyperfocus, onAddSubtask, onToggleSubtask, onSetEffort, onSetPriority, onUpdateDependencies
+  task, availableTasks, onComplete, onDelete, onStatusChange, onEnterHyperfocus, onAddSubtask, onToggleSubtask, onSetEffort, onSetPriority, onUpdateDependencies, onUpdateRecurring
 }: { 
   key?: string | number,
   task: Task; 
@@ -402,6 +410,7 @@ function TaskCard({
   onEnterHyperfocus: () => void; onAddSubtask: (text: string) => void; onToggleSubtask: (subId: string) => void; onSetEffort: (effort: EffortSize | null) => void;
   onSetPriority: (priority: 'high' | 'medium' | 'low' | null) => void;
   onUpdateDependencies: (deps: string[]) => void;
+  onUpdateRecurring: (recurring: RecurringConfig | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [subInput, setSubInput] = useState('');
@@ -443,6 +452,11 @@ function TaskCard({
              {isBlocked && (
                 <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-slate-200 bg-slate-100 text-slate-500 shrink-0 mt-0.5 flex items-center gap-1">
                   Blocked
+                </span>
+             )}
+             {task.recurring && (
+                <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-600 shrink-0 mt-0.5 flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3" /> Repeating
                 </span>
              )}
            </div>
@@ -561,6 +575,53 @@ function TaskCard({
                   </div>
                </div>
 
+               <div className="flex flex-col gap-3">
+                  <span className="text-sm font-bold text-slate-600">Recurring Status</span>
+                  <div className="flex flex-col gap-2">
+                     <select 
+                        value={task.recurring?.frequency || ""}
+                        onChange={e => {
+                           const val = e.target.value;
+                           if (!val) {
+                              onUpdateRecurring(null);
+                           } else {
+                              onUpdateRecurring({ frequency: val as any, dayOfWeek: 0, dateOfMonth: 1 });
+                           }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none focus:border-indigo-400"
+                     >
+                        <option value="">Doesn't repeat</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                     </select>
+
+                     {task.recurring?.frequency === 'weekly' && (
+                        <select 
+                           value={task.recurring.dayOfWeek?.toString() || "0"}
+                           onChange={e => onUpdateRecurring({...task.recurring!, dayOfWeek: parseInt(e.target.value)})}
+                           className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none focus:border-indigo-400"
+                        >
+                           {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day, idx) => (
+                              <option key={idx} value={idx}>On {day}s</option>
+                           ))}
+                        </select>
+                     )}
+
+                     {task.recurring?.frequency === 'monthly' && (
+                        <select 
+                           value={task.recurring.dateOfMonth?.toString() || "1"}
+                           onChange={e => onUpdateRecurring({...task.recurring!, dateOfMonth: parseInt(e.target.value)})}
+                           className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none focus:border-indigo-400"
+                        >
+                           {Array.from({length: 31}, (_, i) => i + 1).map(date => (
+                              <option key={date} value={date}>On the {date}{[1,21,31].includes(date)?'st':[2,22].includes(date)?'nd':[3,23].includes(date)?'rd':'th'}</option>
+                           ))}
+                        </select>
+                     )}
+                  </div>
+               </div>
+
             </div>
           </motion.div>
         )}
@@ -599,7 +660,14 @@ function VisualGarden({ sunlight }: { sunlight: number }) {
 
 // 6. Habit Tracker Component integrating Categories
 function HabitCard({ habit, category, onLog, onEdit }: { key?: string | number, habit: Habit; category: Category | undefined; onLog: (tier: 'mini'|'plus'|'elite', sunlightReward: number, momentumBoost: number) => void; onEdit: () => void; }) {
+  const [expanded, setExpanded] = useState(false);
   const isLoggedToday = new Date().toDateString() === new Date(habit.lastLoggedAt).toDateString();
+  
+  const heatmapDays = Array.from({length: 28}).map((_, i) => {
+     const d = new Date();
+     d.setDate(d.getDate() - (27 - i));
+     return d.toDateString();
+  });
   
   return (
     <motion.div layout className={`bg-white rounded-[2rem] p-5 shadow-sm border ${isLoggedToday ? 'border-teal-100 bg-teal-50/20' : 'border-slate-100 hover:border-slate-200'} transition-all`}>
@@ -616,6 +684,9 @@ function HabitCard({ habit, category, onLog, onEdit }: { key?: string | number, 
                 <Flame className={`w-4 h-4 ${habit.momentum > 0 ? 'text-amber-500' : 'text-amber-200 text-opacity-50'}`} />
                 <span className={`text-sm font-bold ${habit.momentum > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{habit.momentum}</span>
              </div>
+             <button onClick={() => setExpanded(!expanded)} className={`p-1.5 rounded-full transition-colors flex shrink-0 ${expanded ? 'bg-indigo-100 text-indigo-600' : 'text-slate-300 hover:text-slate-600 bg-slate-50 hover:bg-slate-100'}`} title="Toggle Heatmap">
+                <Activity className="w-4 h-4"/>
+             </button>
              <button onClick={onEdit} className="p-1.5 text-slate-300 hover:text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-full transition-colors flex shrink-0" title="Edit Habit">
                 <Settings2 className="w-4 h-4"/>
              </button>
@@ -653,6 +724,26 @@ function HabitCard({ habit, category, onLog, onEdit }: { key?: string | number, 
             </button>
          </div>
        )}
+
+       <AnimatePresence>
+         {expanded && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden mt-5 pt-4 border-t border-slate-100">
+               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">28-Day Consistency</span>
+               <div className="grid grid-cols-7 gap-1.5 h-max">
+                 {heatmapDays.map((dateStr, idx) => {
+                    const didLog = habit.history && habit.history.includes(dateStr);
+                    return (
+                       <div 
+                         key={idx} 
+                         title={dateStr}
+                         className={`aspect-square rounded-md ${didLog ? 'bg-teal-500 shadow-sm border border-teal-600/20' : 'bg-slate-100 border border-slate-200/50'}`}
+                       />
+                    )
+                 })}
+               </div>
+            </motion.div>
+         )}
+       </AnimatePresence>
     </motion.div>
   )
 }
@@ -679,12 +770,11 @@ export default function App() {
   const [emergencyMode, setEmergencyMode] = useState(false);
   const [editingHabit, setEditingHabit] = useState<Habit | null | 'new'>(null);
 
-  // Gemini Integration States
+  // Voice & Parsing States
   const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSmartCompiling, setIsSmartCompiling] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<any>(null);
 
   // Calendar Integration States
   const [calendarToken, setCalendarToken] = useLocalStorage<{ access_token: string, expiry: number } | null>('ff_v2_calendar_token', null);
@@ -732,6 +822,11 @@ export default function App() {
          throw new Error("Token expired");
       }
       const data = await res.json();
+      if (!res.ok) {
+         console.error("Calendar API Error:", data);
+         alert(`Calendar Sync Error: ${data.error?.message || "Verify Google Calendar API is enabled in GCP."}`);
+         return;
+      }
       setCalendarEvents(data.items || []);
     } catch (err) {
       console.error(err);
@@ -811,7 +906,7 @@ export default function App() {
     const purgeThreshold = BANKRUPTCY_HR * 60 * 60 * 1000;
     const interval = setInterval(() => {
       const now = Date.now();
-      setTasks(prev => prev.filter(t => t.completed || (now - t.createdAt) < purgeThreshold));
+      setTasks(prev => prev.filter(t => t.completed || t.recurring || (now - t.createdAt) < purgeThreshold));
     }, 60 * 1000); 
     return () => clearInterval(interval);
   }, [setTasks]);
@@ -835,145 +930,125 @@ export default function App() {
     if (updated) setHabits(newHabits);
   }, []);
 
+  useEffect(() => {
+    setTasks(prev => {
+      const activeTodayLength = prev.filter(t => !t.completed && t.status === 'today' && (!t.showAfter || t.showAfter <= Date.now())).length;
+      if (activeTodayLength >= 5) return prev;
+      
+      const activeBacklog = prev.filter(t => !t.completed && t.status === 'backlog' && (!t.showAfter || t.showAfter <= Date.now()));
+      if (activeBacklog.length === 0) return prev;
+
+      const needed = 5 - activeTodayLength;
+      
+      const pL = (p: Task['priority']) => p === 'high' ? 3 : p === 'medium' ? 2 : p === 'low' ? 1 : 0;
+      const sortedBacklog = [...activeBacklog].sort((a,b) => {
+        const pDiff = pL(b.priority) - pL(a.priority);
+        return pDiff !== 0 ? pDiff : b.createdAt - a.createdAt;
+      });
+
+      const toPromoteIds = sortedBacklog.slice(0, needed).map(t => t.id);
+      
+      let changed = false;
+      const next = prev.map(t => {
+         if (toPromoteIds.includes(t.id)) {
+            changed = true;
+            return { ...t, status: 'today' };
+         }
+         return t;
+      });
+      return changed ? next : prev;
+    });
+  }, [tasks]);
+
   const handleSmartCapture = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!captureInput.trim()) return;
     
     setIsSmartCompiling(true);
-    try {
-      if (!process.env.GEMINI_API_KEY) throw new Error("Missing GEMINI_API_KEY");
-      
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-preview',
-        contents: "You are an ADHD productivity assistant. Parse the following 'brain dump' into a structured list of actionable tasks. Break down complex tasks into subtasks. Assign 'estimatedTime' exactly matching one of: 'short' (<=15m), 'medium' (~45m), or 'deep' (~90m).\n\nBrain dump: " + captureInput,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              tasks: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    text: { type: Type.STRING },
-                    estimatedTime: { type: Type.STRING, enum: ['short', 'medium', 'deep'] },
-                    subtasks: { type: Type.ARRAY, items: { type: Type.STRING } }
-                  },
-                  required: ["text"]
-                }
-              }
-            },
-            required: ["tasks"]
-          }
-        }
-      });
-      
-      const jsonStr = response.text || '{"tasks":[]}';
-      const data = JSON.parse(jsonStr.replace(/```json/g, '').replace(/```/g, '').trim());
-      
-      if (data.tasks && Array.isArray(data.tasks)) {
-        let todayCount = tasks.filter(t => !t.completed && t.status === 'today').length;
-        const newTasks: Task[] = data.tasks.map((pt: any) => {
-           let assignedStatus: 'today' | 'backlog' = 'today';
-           if (todayCount >= 5) assignedStatus = 'backlog';
-           else todayCount++;
-           
-           return {
-             id: crypto.randomUUID(),
-             text: pt.text.charAt(0).toUpperCase() + pt.text.slice(1),
-             completed: false,
-             createdAt: Date.now(),
-             status: assignedStatus,
-             priority: 'medium',
-             estimatedTime: pt.estimatedTime || null,
-             subtasks: pt.subtasks ? pt.subtasks.map((st: string) => ({ id: crypto.randomUUID(), text: st, completed: false })) : [],
-             dependencies: []
-           };
-        });
-        setTasks(prev => [...newTasks, ...prev]);
-        setCaptureInput('');
-      } else {
-        throw new Error("Invalid format");
-      }
-    } catch (err: any) {
-      console.error(err);
-      if (err.message === "Missing GEMINI_API_KEY") {
-         alert("Failed to analyze. Please ensure your Gemini API key is configured.");
-      } else {
-         alert("Failed to analyze. Invalid API key or model error.");
-      }
-    } finally {
-      setIsSmartCompiling(false);
+    let todayCount = tasks.filter(t => !t.completed && t.status === 'today').length;
+    
+    // Parse input string: Attempt newlines first, then commas
+    let rawTasks: string[] = [];
+    if (captureInput.includes('\n')) {
+       rawTasks = captureInput.split(/\r?\n/);
+    } else if (captureInput.includes(',')) {
+       rawTasks = captureInput.split(',');
+    } else {
+       rawTasks = [captureInput];
     }
+    
+    rawTasks = rawTasks.map(t => t.trim().replace(/^[-*•]\s*/, '')).filter(t => t.length > 0);
+
+    const newTasks: Task[] = rawTasks.map(text => {
+       let assignedStatus: 'today' | 'backlog' = 'today';
+       if (todayCount >= 5) assignedStatus = 'backlog';
+       else todayCount++;
+       
+       return {
+         id: crypto.randomUUID(),
+         text: text.charAt(0).toUpperCase() + text.slice(1),
+         completed: false,
+         createdAt: Date.now(),
+         status: assignedStatus,
+         priority: 'medium',
+         estimatedTime: null,
+         subtasks: [],
+         dependencies: []
+       };
+    });
+    
+    setTimeout(() => {
+      setTasks(prev => [...newTasks, ...prev]);
+      setCaptureInput('');
+      setIsSmartCompiling(false);
+    }, 500); // Visual delay
   };
 
   const handleToggleMic = async () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Try Chrome or Edge.");
+      return;
+    }
+    
     if (isListening) {
-      mediaRecorderRef.current?.stop();
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
       setIsListening(false);
       return;
     }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
       
-      mediaRecorder.ondataavailable = e => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      recognitionRef.current = recognition;
+
+      recognition.onstart = () => {
+        setIsListening(true);
       };
-      
-      mediaRecorder.onstop = async () => {
-        setIsTranscribing(true);
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        stream.getTracks().forEach(track => track.stop());
-        
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
-          const base64data = (reader.result as string).split(',')[1];
-          try {
-             if (!process.env.GEMINI_API_KEY) throw new Error("Missing GEMINI_API_KEY");
-             
-             // Let Gemini Flash transcribe
-             const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-             const response = await ai.models.generateContent({
-               model: 'gemini-3-flash-preview',
-               contents: [
-                 {
-                   inlineData: {
-                     mimeType: 'audio/webm',
-                     data: base64data,
-                   }
-                 },
-                 { text: "Transcribe the spoken audio accurately. Ignore background noise. Output ONLY the raw transcript without any markdown, formatting, or conversational commentary." }
-               ]
-             });
-             
-             const text = response.text;
-             if (text) {
-                setCaptureInput(prev => (prev + ' ' + text).trim());
-             }
-          } catch(err: any) {
-             console.error('Transcription failed', err);
-             if (err.message === "Missing GEMINI_API_KEY") {
-                alert("Failed to transcribe. Please ensure your Gemini API key is configured.");
-             } else {
-                alert('Failed to transcribe audio. Check API key and permissions.');
-             }
-          } finally {
-             setIsTranscribing(false);
-          }
-        };
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setCaptureInput(prev => (prev ? prev + ' ' + transcript : transcript).trim());
       };
-      
-      mediaRecorder.start();
-      setIsListening(true);
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error", event.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
     } catch (err) {
-      alert("Microphone access denied or error occurred.");
       console.error(err);
+      setIsListening(false);
     }
   };
 
@@ -982,12 +1057,61 @@ export default function App() {
     if (reward === 0) reward = Math.floor(15 * (Math.random() < 0.15 ? 4 : (0.8 + Math.random() * 0.4)));
     setSunlight(prev => prev + reward);
     
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true } : t));
+    setTasks(prev => {
+      const task = prev.find(t => t.id === id);
+      let nextTasks = [...prev];
+      if (task && task.recurring) {
+        const now = new Date();
+        const next = new Date(now);
+        next.setHours(0,0,0,0);
+        
+        if (task.recurring.frequency === 'daily') {
+          next.setDate(next.getDate() + 1);
+        } else if (task.recurring.frequency === 'weekly') {
+          const targetDay = task.recurring.dayOfWeek || 0;
+          let diff = targetDay - now.getDay();
+          if (diff <= 0) diff += 7;
+          next.setDate(next.getDate() + diff);
+        } else if (task.recurring.frequency === 'monthly') {
+          const targetDate = task.recurring.dateOfMonth || 1;
+          let currentMonth = now.getMonth();
+          let currentYear = now.getFullYear();
+          if (now.getDate() >= targetDate) {
+              currentMonth++;
+              if (currentMonth > 11) {
+                  currentMonth = 0;
+                  currentYear++;
+              }
+          }
+          next.setFullYear(currentYear, currentMonth, targetDate);
+        }
+        
+        // Spawn next instance
+        nextTasks.push({
+          ...task,
+          id: crypto.randomUUID(),
+          completed: false,
+          createdAt: Date.now(),
+          showAfter: next.getTime(),
+          subtasks: task.subtasks ? task.subtasks.map(st => ({...st, completed: false})) : []
+        });
+      }
+      return nextTasks.map(t => t.id === id ? { ...t, completed: true } : t);
+    });
+    
     setTimeout(() => { setTasks(prev => prev.filter(t => t.id !== id)); }, 2000);
   };
 
   const handleLogHabit = (id: string, reward: number, boost: number) => {
-    setHabits(prev => prev.map(h => h.id === id ? { ...h, momentum: h.momentum + boost, lastLoggedAt: Date.now() } : h));
+    const todayStr = new Date().toDateString();
+    setHabits(prev => prev.map(h => {
+      if (h.id === id) {
+         const history = h.history ? [...h.history] : [];
+         if (!history.includes(todayStr)) history.push(todayStr);
+         return { ...h, momentum: h.momentum + boost, lastLoggedAt: Date.now(), history };
+      }
+      return h;
+    }));
     const multiplier = Math.random() < 0.20 ? 3 : 1;
     setSunlight(prev => prev + (reward * multiplier));
   };
@@ -1000,7 +1124,7 @@ export default function App() {
 
   const handleSaveHabit = (habitData: { name: string; categoryId: string | null; tiers: { mini: string; plus: string; elite: string } }) => {
     if (editingHabit === 'new') {
-      const newHabit: Habit = { id: crypto.randomUUID(), name: habitData.name, categoryId: habitData.categoryId, tiers: habitData.tiers, momentum: 0, lastLoggedAt: 0 };
+      const newHabit: Habit = { id: crypto.randomUUID(), name: habitData.name, categoryId: habitData.categoryId, tiers: habitData.tiers, momentum: 0, lastLoggedAt: 0, history: [] };
       setHabits(prev => [...prev, newHabit]);
     } else if (editingHabit) {
       setHabits(prev => prev.map(h => h.id === editingHabit.id ? { ...h, name: habitData.name, categoryId: habitData.categoryId, tiers: habitData.tiers } : h));
@@ -1033,12 +1157,12 @@ export default function App() {
 
   const pLevel = (p: Task['priority']) => p === 'high' ? 3 : p === 'medium' ? 2 : p === 'low' ? 1 : 0;
 
-  const activeToday = tasks.filter(t => !t.completed && t.status === 'today').sort((a,b) => {
+  const activeToday = tasks.filter(t => !t.completed && t.status === 'today' && (!t.showAfter || t.showAfter <= Date.now())).sort((a,b) => {
     const pDiff = pLevel(b.priority) - pLevel(a.priority);
     return pDiff !== 0 ? pDiff : b.createdAt - a.createdAt;
   });
   
-  const activeBacklog = tasks.filter(t => !t.completed && t.status === 'backlog').sort((a,b) => {
+  const activeBacklog = tasks.filter(t => !t.completed && t.status === 'backlog' && (!t.showAfter || t.showAfter <= Date.now())).sort((a,b) => {
     const pDiff = pLevel(b.priority) - pLevel(a.priority);
     return pDiff !== 0 ? pDiff : b.createdAt - a.createdAt;
   });
@@ -1118,18 +1242,18 @@ export default function App() {
 
         <section className="mb-12">
            <div className="flex items-center gap-2 mb-3 ml-2">
-              <Sparkles className="w-4 h-4 text-slate-400" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Gemini Smart Capture</span>
+              <Zap className="w-4 h-4 text-slate-400" />
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Quick Task Capture</span>
            </div>
            <form onSubmit={handleSmartCapture} className={`relative shadow-sm rounded-[2rem] bg-white border p-2 overflow-hidden transition-all ${isListening ? 'ring-4 ring-rose-500/20 border-rose-200' : 'focus-within:ring-4 ring-teal-500/20 border-slate-100'}`}>
-             <input type="text" disabled={isTranscribing || isSmartCompiling} placeholder={isTranscribing ? "Transcribing speech..." : isSmartCompiling ? "Analyzing tasks..." : "Dictate your thoughts..."} value={captureInput} onChange={(e) => setCaptureInput(e.target.value)} className="w-full bg-transparent p-6 pr-20 text-xl font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:opacity-50" />
+             <input type="text" disabled={isTranscribing || isSmartCompiling} placeholder={isTranscribing ? "Transcribing speech..." : isSmartCompiling ? "Analyzing tasks..." : "List your thoughts... (separate with new lines or commas)"} value={captureInput} onChange={(e) => setCaptureInput(e.target.value)} className="w-full bg-transparent p-6 pr-20 text-xl font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:opacity-50" />
              <button type="button" onClick={handleToggleMic} disabled={isTranscribing || isSmartCompiling} className={`absolute right-4 top-1/2 -translate-y-1/2 w-14 h-14 rounded-[1.25rem] flex items-center justify-center transition-colors shadow-md ${isListening ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/30 animate-pulse' : 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20 disabled:opacity-50'}`} title="Voice Dictation">
                 {isTranscribing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Mic className="w-6 h-6" />}
              </button>
            </form>
            {captureInput.length > 0 && !isListening && !isTranscribing && (
               <motion.button disabled={isSmartCompiling} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} onClick={(e: any) => handleSmartCapture(e)} className="mt-4 px-6 py-3.5 bg-slate-800 text-white rounded-xl shadow-md font-bold text-sm hover:bg-slate-700 border border-slate-700 w-full flex justify-center items-center gap-2 transition-colors disabled:opacity-75">
-                {isSmartCompiling ? <><Loader2 className="w-4 h-4 animate-spin"/> Processing with Gemini...</> : "Parse into Tasks"}
+                {isSmartCompiling ? <><Loader2 className="w-4 h-4 animate-spin"/> Parsing Tasks...</> : "Parse into Tasks"}
               </motion.button>
            )}
         </section>
@@ -1190,6 +1314,47 @@ export default function App() {
            )}
         </section>
 
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 mb-12">
+           <section className="lg:col-span-12 flex flex-col gap-6">
+              <div className="flex items-center justify-between pl-2">
+                 <div className="flex items-baseline gap-4">
+                   <h2 className="text-xl font-bold text-slate-800">Today's Focus</h2>
+                   <span className="text-sm font-semibold text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
+                     {activeToday.length} / 5 Max
+                   </span>
+                 </div>
+                 
+                 {activeToday.length > 1 && (
+                   <button onClick={pickForMe} disabled={isSpinning} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 font-bold text-sm rounded-xl hover:bg-indigo-100 transition-colors disabled:opacity-50">
+                     <Dices className={`w-4 h-4 ${isSpinning ? 'animate-spin' : ''}`}/> Pick For Me
+                   </button>
+                 )}
+              </div>
+              
+              {activeToday.length === 0 && (
+                <div className="p-10 border-2 border-dashed border-slate-200 rounded-[2rem] text-center flex flex-col items-center justify-center gap-4 text-slate-400 bg-white/50">
+                   <Target className="w-10 h-10 opacity-50" />
+                   <p className="font-medium text-lg">Your focus board is perfectly clear.</p>
+                </div>
+              )}
+
+              <AnimatePresence>
+                {activeToday.map(task => (
+                  <TaskCard
+                    key={task.id} task={task} availableTasks={tasks} onComplete={() => completeTask(task.id)} onDelete={() => setTasks(prev => prev.filter(t => t.id !== task.id))}
+                    onStatusChange={(status) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, status} : t))}
+                    onEnterHyperfocus={() => setHyperfocusTask(task)} onAddSubtask={(str) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: [...(t.subtasks||[]), {id: crypto.randomUUID(), text: str, completed: false}]} : t))}
+                    onToggleSubtask={(subId) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: t.subtasks?.map(s => s.id === subId ? {...s, completed: !s.completed} : s)} : t))}
+                    onSetEffort={(eff) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, estimatedTime: eff} : t))}
+                    onSetPriority={(p) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, priority: p} : t))}
+                    onUpdateDependencies={(deps) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, dependencies: deps} : t))}
+                    onUpdateRecurring={(rec) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, recurring: rec} : t))}
+                  />
+                ))}
+              </AnimatePresence>
+           </section>
+        </div>
+
         {/* Phase 2: Elastic Habit Tracking with Categories */}
         <section className="mb-16">
            <div className="flex flex-col sm:flex-row sm:items-end justify-between pl-2 mb-4 border-b border-slate-100 pb-4 gap-4">
@@ -1242,44 +1407,6 @@ export default function App() {
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-           <section className="lg:col-span-12 flex flex-col gap-6">
-              <div className="flex items-center justify-between pl-2">
-                 <div className="flex items-baseline gap-4">
-                   <h2 className="text-xl font-bold text-slate-800">Today's Focus</h2>
-                   <span className="text-sm font-semibold text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
-                     {activeToday.length} / 5 Max
-                   </span>
-                 </div>
-                 
-                 {activeToday.length > 1 && (
-                   <button onClick={pickForMe} disabled={isSpinning} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 font-bold text-sm rounded-xl hover:bg-indigo-100 transition-colors disabled:opacity-50">
-                     <Dices className={`w-4 h-4 ${isSpinning ? 'animate-spin' : ''}`}/> Pick For Me
-                   </button>
-                 )}
-              </div>
-              
-              {activeToday.length === 0 && (
-                <div className="p-10 border-2 border-dashed border-slate-200 rounded-[2rem] text-center flex flex-col items-center justify-center gap-4 text-slate-400 bg-white/50">
-                   <Target className="w-10 h-10 opacity-50" />
-                   <p className="font-medium text-lg">Your focus board is perfectly clear.</p>
-                </div>
-              )}
-
-              <AnimatePresence>
-                {activeToday.map(task => (
-                  <TaskCard
-                    key={task.id} task={task} availableTasks={tasks} onComplete={() => completeTask(task.id)} onDelete={() => setTasks(prev => prev.filter(t => t.id !== task.id))}
-                    onStatusChange={(status) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, status} : t))}
-                    onEnterHyperfocus={() => setHyperfocusTask(task)} onAddSubtask={(str) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: [...(t.subtasks||[]), {id: crypto.randomUUID(), text: str, completed: false}]} : t))}
-                    onToggleSubtask={(subId) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: t.subtasks?.map(s => s.id === subId ? {...s, completed: !s.completed} : s)} : t))}
-                    onSetEffort={(eff) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, estimatedTime: eff} : t))}
-                    onSetPriority={(p) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, priority: p} : t))}
-                    onUpdateDependencies={(deps) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, dependencies: deps} : t))}
-                  />
-                ))}
-              </AnimatePresence>
-           </section>
-
            <section className="lg:col-span-12 flex flex-col gap-6 mt-6">
               <div className="flex items-baseline justify-between pl-2">
                  <h2 className="text-xl font-bold text-slate-800">The Archive</h2>
@@ -1310,6 +1437,11 @@ export default function App() {
                            {task.dependencies && task.dependencies.some(dId => tasks.find(t => t.id === dId && !t.completed)) && (
                              <span className="text-[10px] w-max font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-slate-200 bg-slate-100 text-slate-500 shrink-0 mt-1">
                                Blocked
+                             </span>
+                           )}
+                           {task.recurring && (
+                             <span className="text-[10px] flex items-center gap-1 w-max font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-600 shrink-0 mt-1">
+                               <RefreshCw className="w-3 h-3" /> Repeating
                              </span>
                            )}
                          </div>

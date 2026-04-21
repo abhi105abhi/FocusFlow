@@ -1,6 +1,5 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 
 async function startServer() {
@@ -11,6 +10,14 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
 
   // Google Calendar OAuth Routes
+  const getRedirectUri = (req: express.Request) => {
+    let protocol = req.headers['x-forwarded-proto'] || (req.hostname === 'localhost' ? 'http' : 'https');
+    if (Array.isArray(protocol)) protocol = protocol[0];
+    let host = req.headers['x-forwarded-host'] || req.get('host');
+    if (Array.isArray(host)) host = host[0];
+    return `${protocol}://${host}/api/auth/callback`;
+  };
+
   app.get('/api/auth/url', (req, res) => {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       return res.status(500).json({ 
@@ -19,7 +26,7 @@ async function startServer() {
       });
     }
 
-    const redirectUri = `${req.hostname === 'localhost' ? 'http' : 'https'}://${req.get('host')}/api/auth/callback`;
+    const redirectUri = getRedirectUri(req);
     const params = new URLSearchParams({
       client_id: process.env.GOOGLE_CLIENT_ID,
       redirect_uri: redirectUri,
@@ -34,7 +41,7 @@ async function startServer() {
 
   app.get('/api/auth/callback', async (req, res) => {
     const { code } = req.query;
-    const redirectUri = `${req.hostname === 'localhost' ? 'http' : 'https'}://${req.get('host')}/api/auth/callback`;
+    const redirectUri = getRedirectUri(req);
 
     try {
       const response = await fetch('https://oauth2.googleapis.com/token', {
@@ -50,6 +57,18 @@ async function startServer() {
       });
 
       const tokens = await response.json();
+
+      if (!response.ok) {
+        console.error("Token exchange failed:", tokens);
+        res.status(400).send(`
+          <html><body>
+            <h2>Authentication Error</h2>
+            <p>Failed to exchange token. Check Google Client ID/Secret.</p>
+            <pre>${JSON.stringify(tokens, null, 2)}</pre>
+          </body></html>
+        `);
+        return;
+      }
 
       res.send(`
         <html>
