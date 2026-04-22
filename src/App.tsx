@@ -406,103 +406,73 @@ function TaskCard({
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className={`glass p-4 md:p-6 rounded-[2.5rem] shadow-xl hover:shadow-2xl transition-all duration-300 border-white/50 group/card relative overflow-hidden ${isBlocked && !task.completed ? "opacity-80" : ""}`}
+      exit={{ opacity: 0, scale: 0.98 }}
+      whileHover={{ y: -2 }}
+      className={`relative group/card bg-white rounded-[2.5rem] p-5 md:p-7 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.08)] border border-slate-100/50 transition-all duration-500 overflow-hidden ${isBlocked && !task.completed ? "opacity-90" : ""}`}
     >
-      {/* Blocked Overlay Pattern */}
-      {isBlocked && !task.completed && (
-        <div
-          className="absolute inset-0 bg-slate-50/10 pointer-events-none z-0"
-          style={{
-            backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)",
-            backgroundSize: "24px 24px",
-          }}
-        />
-      )}
+      {/* Subtle Gradient Accent */}
+      <div className={`absolute top-0 inset-x-0 h-1.5 opacity-0 group-hover/card:opacity-100 transition-opacity ${task.priority === "primary" ? "bg-gradient-to-r from-rose-400 to-rose-600" : "bg-gradient-to-r from-teal-400 to-teal-600"}`} />
 
-      {/* Background weight indicator (Novelty/INCUP) */}
-      <div className="absolute top-0 right-0 p-3 opacity-10">
-        <span className="text-[40px] font-black italic text-slate-400">
-          {Math.round(activationWeight * 10)}
-        </span>
-      </div>
-
-      <div className="flex gap-5 items-start relative z-10">
+      <div className="flex gap-6 items-start relative z-10">
         <button
           disabled={cannotComplete}
           onClick={handleComplete}
           aria-label="Complete task"
-          className={`mt-1.5 w-8 h-8 rounded-xl border-2 flex items-center justify-center transition-all shrink-0 shadow-sm ${cannotComplete ? "border-slate-100 bg-slate-50/50 cursor-not-allowed text-slate-300" : "border-slate-200 bg-white hover:border-teal-500 hover:bg-teal-50 hover:scale-110 active:scale-95"}`}
+          className={`mt-1 w-10 h-10 rounded-[1.25rem] border-2 flex items-center justify-center transition-all shrink-0 ${cannotComplete ? "border-slate-50 bg-slate-50/30 cursor-not-allowed text-slate-200" : "border-slate-200 bg-white hover:border-teal-500 hover:bg-teal-50 group-hover/card:scale-110 active:scale-90"}`}
         >
           {task.completed ? (
-            <Check className="w-5 h-5 text-teal-600" strokeWidth={3} />
+            <Check className="w-6 h-6 text-teal-600" strokeWidth={3} />
           ) : isBlocked ? (
             <Clock className="w-4 h-4 text-slate-300" />
           ) : null}
         </button>
 
         <div
-          className="flex-1 flex flex-col cursor-pointer"
+          className="flex-1 flex flex-col cursor-pointer mt-1"
           onClick={() => setExpanded(!expanded)}
         >
-          <div className="flex items-center gap-2 flex-wrap min-h-[32px]">
+          <div className="flex items-center gap-3 flex-wrap min-h-[32px]">
             <span
-              className={`text-xl font-bold tracking-tight ${task.completed ? "text-slate-400" : "text-slate-900"} group-hover/card:text-teal-700 transition-colors`}
+              className={`text-xl md:text-2xl font-bold tracking-tight leading-tight ${task.completed ? "text-slate-300 line-through" : "text-slate-900"} group-hover/card:text-slate-900 transition-colors`}
             >
               {task.text}
             </span>
             {isBlocked && !task.completed && (
-              <span className="text-[9px] font-black tracking-[0.1em] uppercase px-2.5 py-1 rounded-lg border bg-slate-900 text-white shadow-sm shrink-0 flex items-center gap-1.5">
+              <span className="text-[9px] font-black tracking-widest uppercase px-3 py-1.5 rounded-full bg-slate-900 text-white shadow-xl shrink-0 flex items-center gap-1.5">
                 <Pause className="w-2.5 h-2.5" /> Blocked
               </span>
             )}
-            {task.priority && (
-              <span
-                className={`text-[9px] font-black tracking-[0.1em] uppercase px-2.5 py-1 rounded-lg border shadow-sm ${priorityStyles[task.priority]} shrink-0`}
-              >
-                {task.priority}
+            {task.priority === "primary" && (
+              <span className="text-[9px] font-black tracking-widest uppercase px-3 py-1.5 rounded-full bg-rose-500 text-white shadow-lg shadow-rose-500/20 shrink-0">
+                Primary
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 mt-3 flex-wrap">
-            {isBlocked && !task.completed && (
-              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
-                <ArrowUp className="w-3 h-3 text-slate-400" /> Needs:
-                <span className="text-slate-700 lowercase italic">
-                  {blockingTasks.map((t) => t.text).join(", ")}
+          
+          <div className="flex items-center gap-4 mt-4 flex-wrap">
+            {task.effort && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-100 group-hover/card:bg-white transition-colors">
+                <div className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                  {task.effort} • {EFFORT_MAP[task.effort]}m
                 </span>
               </div>
             )}
 
-            {task.effort && (
-              <span className="text-[10px] font-bold text-teal-700 bg-teal-400/10 px-3 py-1.5 rounded-full border border-teal-400/20 shadow-sm uppercase tracking-wider">
-                {task.effort} • {EFFORT_MAP[task.effort]}m
-              </span>
+            {task.nature === "recurring" && task.recurringRules && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50/50 border border-indigo-100/50">
+                <Clock className="w-3 h-3 text-indigo-400" />
+                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                  {task.recurringRules.frequency}
+                </span>
+              </div>
             )}
 
-            {/* Spoon Cost Display (Page 5) */}
-            <div className="flex gap-1.5">
-              {(
-                Object.entries(task.spoons || DEFAULT_SPOONS) as [
-                  SpoonType,
-                  number,
-                ][]
-              )
-                .filter((s) => s[1] > 0)
-                .map(([type, val]) => (
-                  <div
-                    key={type}
-                    className={`w-1.5 h-1.5 rounded-full ${type === "focus" ? "bg-indigo-400" : type === "social" ? "bg-rose-400" : type === "sensory" ? "bg-amber-400" : "bg-emerald-400"}`}
-                    title={`${type} cost: ${val}`}
-                  />
-                ))}
-            </div>
-
             {task.subtasks && task.subtasks.length > 0 && (
-              <div className="flex items-center gap-2 bg-slate-100/50 px-3 py-1.5 rounded-full border border-slate-200/50">
-                <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{
@@ -511,38 +481,25 @@ function TaskCard({
                     className="h-full bg-teal-500"
                   />
                 </div>
-                <span className="text-[10px] font-black text-slate-500 tabular-nums">
-                  {task.subtasks.filter((s) => s.completed).length}/
-                  {task.subtasks.length}
+                <span className="text-[10px] font-black text-slate-400 tabular-nums uppercase tracking-widest">
+                  {task.subtasks.filter((s) => s.completed).length}/{task.subtasks.length} Step{task.subtasks.length !== 1 ? 's' : ''}
                 </span>
               </div>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 self-center">
           {task.status === "dump" && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onPromote();
               }}
-              className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-lg"
+              className="w-10 h-10 flex items-center justify-center text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-2xl transition-all"
               title="Promote to Primary"
             >
               <Zap className="w-5 h-5" />
-            </button>
-          )}
-          {task.status === "upcoming" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onGrabEarly();
-              }}
-              className="p-2 text-teal-600 hover:bg-teal-50 rounded-lg"
-              title="Grab Early"
-            >
-              <Play className="w-5 h-5" />
             </button>
           )}
           <button
@@ -550,7 +507,7 @@ function TaskCard({
               e.stopPropagation();
               onDelete();
             }}
-            className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+            className="w-10 h-10 flex items-center justify-center text-slate-200 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"
             title="Delete task"
           >
             <Trash2 className="w-5 h-5" />
@@ -972,6 +929,7 @@ export default function App() {
   const [captureNature, setCaptureNature] = useState<TaskNature>("one-time");
   const [captureFreq, setCaptureFreq] = useState<RecurringFrequency>("daily");
   const [captureDays, setCaptureDays] = useState<number[]>([]);
+  const [captureToFocus, setCaptureToFocus] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isTriageMode, setIsTriageMode] = useState(false);
   const [focusTask, setFocusTask] = useState<Task | null>(null);
@@ -1112,7 +1070,7 @@ export default function App() {
 
     const deadlineTimestamp = captureDeadline
       ? new Date(captureDeadline).getTime()
-      : captureIsPrimary
+      : (captureIsPrimary || captureToFocus)
         ? Date.now() + 86400000
         : undefined;
 
@@ -1122,12 +1080,15 @@ export default function App() {
       completed: false,
       createdAt: Date.now(),
       lastInteractedAt: Date.now(),
-      status: captureIsPrimary
-        ? "primary"
-        : captureNature === "recurring"
-          ? "upcoming"
-          : "dump",
-      priority: captureIsPrimary ? "primary" : "normal",
+      status: captureToFocus
+        ? "focus"
+        : captureIsPrimary
+          ? "primary"
+          : captureNature === "recurring"
+            ? "upcoming"
+            : "dump",
+      focusDate: captureToFocus ? Date.now() : undefined,
+      priority: (captureIsPrimary || captureToFocus) ? "primary" : "normal",
       nature: captureNature,
       recurringRules:
         captureNature === "recurring"
@@ -1137,7 +1098,7 @@ export default function App() {
       subtasks: [],
       note: "",
       effort: "standard",
-      spoons: { focus: 2, social: 1, sensory: 1, executive: 2 },
+      spoons: { focus: 1, social: 1, sensory: 1, executive: 1 },
       incup: { interest: 3, novelty: 5, challenge: 2, urgency: 1, passion: 2 },
       dependencyIds: [],
     }));
@@ -1146,13 +1107,13 @@ export default function App() {
       setTasks((prev) => [...newTasks, ...prev]);
       setCaptureInput("");
       setCaptureIsPrimary(false);
+      setCaptureToFocus(false);
       setCaptureDeadline("");
       setCaptureNature("one-time");
       setCaptureFreq("daily");
       setCaptureDays([]);
       setIsCapturing(false);
       setIsProcessing(false);
-      // Triage Ritual: Trigger sorting if more than 3 new items
       if (newTasks.length > 3) setIsTriageMode(true);
     }, 400);
   };
@@ -1200,22 +1161,17 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50/20 text-slate-900 selection:bg-teal-100 selection:text-teal-900 overflow-x-hidden">
       {/* Main Content Area */}
-      <main className="pt-12 md:pt-20 pb-48 px-6 md:px-12 max-w-5xl mx-auto w-full">
-        <div className="mb-12 md:mb-20">
-          <h2 className="text-4xl md:text-6xl font-black tracking-tighter text-slate-900 capitalize italic font-display leading-[0.9]">
-            {activeView === "focus"
-              ? "Surgical Focus"
-              : activeView === "dump"
-                ? "Mental Offloading"
-                : activeView === "archive"
-                  ? "Execution History"
-                  : activeView === "primary"
-                    ? "Primary Objectives"
-                    : "Upcoming Schedule"}
-          </h2>
+      <main className="pt-16 md:pt-24 pb-48 px-6 md:px-12 max-w-5xl mx-auto w-full">
+        <div className="mb-10">
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${activeView === 'focus' ? 'bg-teal-500 shadow-[0_0_10px_rgba(20,184,166,0.5)] animate-pulse' : 'bg-slate-300'}`} />
+            <span className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400">
+              System \\ {activeView}
+            </span>
+          </div>
         </div>
 
-        {/* Task Columns / List */}
+        {/* Task List */}
         <div className="flex flex-col gap-10">
           <AnimatePresence mode="popLayout">
             {filteredTasks
@@ -1457,9 +1413,20 @@ export default function App() {
                         )}
                       </div>
                       <span className="text-sm font-black uppercase tracking-widest text-slate-600">
-                        Primary Objective
+                        Primary
                       </span>
                     </label>
+
+                    <button
+                      type="button"
+                      onClick={() => setCaptureToFocus(!captureToFocus)}
+                      className={`flex items-center gap-3 px-5 py-2.5 rounded-full border-2 transition-all ${captureToFocus ? "bg-teal-600 border-teal-600 text-white shadow-xl shadow-teal-600/30" : "bg-white border-slate-100 text-slate-400 hover:border-slate-200"}`}
+                    >
+                      <Target className={`w-4 h-4 ${captureToFocus ? "animate-pulse" : ""}`} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">
+                        Focus Today
+                      </span>
+                    </button>
 
                     {captureIsPrimary && (
                       <motion.div
