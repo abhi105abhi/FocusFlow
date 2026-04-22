@@ -1,9 +1,54 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Mic, Check, Clock, Maximize2, Play, Pause, Minimize2, Sun, LifeBuoy, ArrowDown, ArrowUp, Trash2, Volume2, VolumeX, Sprout, TreePine, Flower2, Target, Flame, Activity, Plus, Settings2, X, Dices, Inbox, Zap, Loader2, Sparkles, Calendar as CalendarIcon, Bell, RefreshCw } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useEffect, useRef } from "react";
+import {
+  Mic,
+  Check,
+  Clock,
+  Maximize2,
+  Play,
+  Pause,
+  Minimize2,
+  Sun,
+  LifeBuoy,
+  ArrowDown,
+  ArrowUp,
+  Trash2,
+  Volume2,
+  VolumeX,
+  Target,
+  Activity,
+  Plus,
+  X,
+  Inbox,
+  Zap,
+  Loader2,
+  LayoutGrid,
+  Archive,
+  Dices,
+  Sparkles,
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
 // --- Types ---
-type EffortSize = 'short' | 'medium' | 'deep';
+type EffortSize = "quick" | "standard" | "deep";
+type TaskStatus = "focus" | "primary" | "upcoming" | "dump" | "archive";
+type TaskPriority = "primary" | "secondary" | "normal";
+type TaskNature = "one-time" | "recurring";
+type RecurringFrequency = "daily" | "weekly" | "monthly";
+
+interface RecurringRules {
+  frequency: RecurringFrequency;
+  days?: number[]; // [0-6] for weekly, dates 1-31 for monthly
+}
+
+// Research-Driven Additions
+type SpoonType = "focus" | "social" | "sensory" | "executive";
+interface INCUP {
+  interest: number; // 0-5
+  novelty: number; // 0-5
+  challenge: number; // 0-5
+  urgency: number; // 0-5
+  passion: number; // 0-5
+}
 
 interface Subtask {
   id: string;
@@ -11,52 +56,64 @@ interface Subtask {
   completed: boolean;
 }
 
-interface RecurringConfig {
-  frequency: 'daily' | 'weekly' | 'monthly';
-  dayOfWeek?: number; // 0-6 (0 is Sunday)
-  dateOfMonth?: number; // 1-31
-}
-
 interface Task {
   id: string;
   text: string;
+  note?: string;
   completed: boolean;
   createdAt: number;
-  status: 'today' | 'backlog';
-  priority?: 'high' | 'medium' | 'low' | null;
-  estimatedTime?: EffortSize | null;
-  subtasks?: Subtask[];
-  dependencies?: string[];
-  recurring?: RecurringConfig | null;
-  showAfter?: number;
+  completedAt?: number;
+  status: TaskStatus;
+  priority: TaskPriority;
+  nature: TaskNature;
+  recurringRules?: RecurringRules;
+  deadline?: number; // timestamp for Primary tasks
+  focusDate?: number; // timestamp to track when it moved to Focus
+  effort?: EffortSize | null;
+  subtasks: Subtask[];
+  dueDate?: number | null;
+  // NIEP Additions
+  spoons: Record<SpoonType, number>;
+  incup: INCUP;
+  evidenceRef?: string; // OCR page 5: Evidence Vault
+  lastInteractedAt: number;
+  dependencyIds: string[];
 }
 
-interface Habit {
-  id: string;
-  name: string;
-  categoryId: string | null;
-  tiers: { mini: string; plus: string; elite: string };
-  momentum: number;
-  lastLoggedAt: number;
-  history?: string[];
+interface SpoonState {
+  current: Record<SpoonType, number>;
+  max: Record<SpoonType, number>;
 }
 
-interface Category {
-  id: string;
-  name: string;
-  color: string;
-}
+const DEFAULT_SPOONS: Record<SpoonType, number> = {
+  focus: 10,
+  social: 10,
+  sensory: 10,
+  executive: 10,
+};
+
+const INCUP_WEIGHTS = {
+  interest: 2,
+  novelty: 1.5,
+  challenge: 1.2,
+  urgency: 2.5,
+  passion: 2,
+};
 
 const TAILWIND_COLORS = [
-  'bg-emerald-100 text-emerald-700 border-emerald-200',
-  'bg-indigo-100 text-indigo-700 border-indigo-200',
-  'bg-rose-100 text-rose-700 border-rose-200',
-  'bg-amber-100 text-amber-700 border-amber-200',
-  'bg-purple-100 text-purple-700 border-purple-200',
-  'bg-sky-100 text-sky-700 border-sky-200',
+  "bg-emerald-100 text-emerald-700 border-emerald-200",
+  "bg-indigo-100 text-indigo-700 border-indigo-200",
+  "bg-rose-100 text-rose-700 border-rose-200",
+  "bg-amber-100 text-amber-700 border-amber-200",
+  "bg-purple-100 text-purple-700 border-purple-200",
+  "bg-sky-100 text-sky-700 border-sky-200",
 ];
 
-const TIME_MAP: Record<EffortSize, number> = { short: 15, medium: 45, deep: 90 };
+const EFFORT_MAP: Record<EffortSize, number> = {
+  quick: 15,
+  standard: 45,
+  deep: 90,
+};
 const BANKRUPTCY_HR = 48;
 
 // --- Custom Hooks ---
@@ -64,7 +121,9 @@ function useLocalStorage<T>(key: string, initialValue: T) {
   const [storedValue, setStoredValue] = useState<T>(() => {
     try {
       const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
+      if (!item) return initialValue;
+      const parsed = JSON.parse(item);
+      return parsed === null ? initialValue : parsed;
     } catch (error) {
       return initialValue;
     }
@@ -79,11 +138,19 @@ function useLocalStorage<T>(key: string, initialValue: T) {
 
 // --- Components ---
 
-function TimeSweep({ totalSeconds, remainingSeconds }: { totalSeconds: number, remainingSeconds: number }) {
+function TimeSweep({
+  totalSeconds,
+  remainingSeconds,
+}: {
+  totalSeconds: number;
+  remainingSeconds: number;
+}) {
   const isOvertime = remainingSeconds < 0;
   const absRemaining = Math.abs(remainingSeconds);
-  const progress = isOvertime ? 1 : Math.max(0, remainingSeconds / totalSeconds);
-  
+  const progress = isOvertime
+    ? 1
+    : Math.max(0, remainingSeconds / totalSeconds);
+
   const radius = 120;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - progress * circumference;
@@ -91,400 +158,401 @@ function TimeSweep({ totalSeconds, remainingSeconds }: { totalSeconds: number, r
   return (
     <div className="relative flex items-center justify-center w-64 h-64 mb-8">
       <svg className="absolute inset-0 w-full h-full transform -rotate-90">
-        <circle cx="128" cy="128" r={radius} className={isOvertime ? "stroke-orange-100" : "stroke-slate-100"} strokeWidth="12" fill="transparent" />
         <circle
-          cx="128" cy="128" r={radius}
+          cx="128"
+          cy="128"
+          r={radius}
+          className={isOvertime ? "stroke-orange-100" : "stroke-slate-100"}
+          strokeWidth="12"
+          fill="transparent"
+        />
+        <circle
+          cx="128"
+          cy="128"
+          r={radius}
           className={isOvertime ? "stroke-orange-400" : "stroke-teal-500"}
-          strokeWidth="12" fill="transparent"
+          strokeWidth="12"
+          fill="transparent"
           strokeDasharray={circumference}
           strokeDashoffset={strokeDashoffset}
           strokeLinecap="round"
-          style={{ transition: 'stroke-dashoffset 1s linear' }}
+          style={{ transition: "stroke-dashoffset 1s linear" }}
         />
       </svg>
       <div className="z-10 flex flex-col items-center">
         {isOvertime ? (
           <>
-            <span className="text-orange-600 font-bold text-sm mb-1">Flow Overtime</span>
-            <span className="text-4xl font-bold text-slate-800">{Math.floor(absRemaining/60)}:{(absRemaining%60).toString().padStart(2,'0')}</span>
+            <span className="text-orange-600 font-bold text-sm mb-1">
+              Flow Overtime
+            </span>
+            <span className="text-4xl font-bold text-slate-800">
+              {Math.floor(absRemaining / 60)}:
+              {(absRemaining % 60).toString().padStart(2, "0")}
+            </span>
           </>
         ) : (
-          <span className="text-4xl font-bold text-slate-800">{Math.floor(absRemaining/60)}:{(absRemaining%60).toString().padStart(2,'0')}</span>
+          <span className="text-4xl font-bold text-slate-800">
+            {Math.floor(absRemaining / 60)}:
+            {(absRemaining % 60).toString().padStart(2, "0")}
+          </span>
         )}
       </div>
     </div>
   );
 }
 
-// 2. Integrated Focus Room
-function HyperfocusOverlay({ task, onClose, onComplete, onLogDistraction }: { task: Task; onClose: () => void; onComplete: (reward: number) => void; onLogDistraction: (text: string) => void; }) {
-  const defaultSeconds = task.estimatedTime ? TIME_MAP[task.estimatedTime] * 60 : 25 * 60;
-  const [totalTime, setTotalTime] = useState(defaultSeconds);
+// 2. Focused Deep Work Mode
+function TaskFocusOverlay({
+  task,
+  onClose,
+  onComplete,
+}: {
+  task: Task;
+  onClose: () => void;
+  onComplete: () => void;
+}) {
+  const defaultSeconds = task.effort ? EFFORT_MAP[task.effort] * 60 : 25 * 60;
   const [timeLeft, setTimeLeft] = useState(defaultSeconds);
   const [isRunning, setIsRunning] = useState(true);
-  const [isNoiseActive, setIsNoiseActive] = useState(false);
-  const [distraction, setDistraction] = useState('');
-  const [showDistractionSuccess, setShowDistractionSuccess] = useState(false);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (isRunning) {
-      interval = setInterval(() => setTimeLeft(t => t - 1), 1000);
+    if (isRunning && timeLeft > 0) {
+      interval = setInterval(() => setTimeLeft((t) => t - 1), 1000);
     }
     return () => clearInterval(interval);
-  }, [isRunning]);
-
-  useEffect(() => {
-    if (!isNoiseActive) return;
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
-    const bufferSize = ctx.sampleRate * 2; 
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const output = buffer.getChannelData(0);
-    let lastOut = 0;
-    for (let i = 0; i < bufferSize; i++) {
-      const white = Math.random() * 2 - 1;
-      output[i] = (lastOut + (0.02 * white)) / 1.02;
-      lastOut = output[i];
-      output[i] *= 3.5; 
-    }
-    const noiseource = ctx.createBufferSource();
-    noiseource.buffer = buffer;
-    noiseource.loop = true;
-    const gainNode = ctx.createGain();
-    gainNode.gain.value = 0.03; 
-    noiseource.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    noiseource.start(0);
-
-    return () => { noiseource.stop(); ctx.close(); };
-  }, [isNoiseActive]);
-
-  const handleDistractionSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if(distraction.trim()) {
-      onLogDistraction(distraction.trim());
-      setDistraction('');
-      setShowDistractionSuccess(true);
-      setTimeout(() => setShowDistractionSuccess(false), 2000);
-    }
-  };
-
-  const setMicroSprint = () => {
-    setTotalTime(5 * 60);
-    setTimeLeft(5 * 60);
-    setIsRunning(true);
-  };
+  }, [isRunning, timeLeft]);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-[#FAFAFA] text-slate-800 flex flex-col md:flex-row shadow-2xl">
-      <button onClick={onClose} className="absolute top-8 right-8 text-slate-400 hover:text-slate-800 z-50 transition-colors">
-        <Minimize2 className="w-8 h-8" />
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] glass-heavy bg-white/90 backdrop-blur-xl flex flex-col items-center justify-center p-8"
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-12 right-12 text-slate-400 hover:text-slate-800 transition-colors"
+      >
+        <X className="w-8 h-8" />
       </button>
 
-      <div className="flex-1 bg-slate-50 flex flex-col items-center justify-center p-8 border-r border-slate-200">
-        <div className="w-64 h-64 bg-slate-200 rounded-[2rem] mb-8 relative overflow-hidden shadow-inner flex items-center justify-center border-4 border-white">
-          <motion.div animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }} className="w-32 h-40 bg-slate-300 rounded-t-3xl absolute bottom-0 flex flex-col items-center">
-            <div className="w-16 h-16 rounded-full bg-slate-400 -mt-8 shadow-sm"></div>
-          </motion.div>
-          <div className="absolute bottom-4 left-4 bg-white/90 px-3 py-1.5 rounded-lg shadow-sm">
-            <span className="text-xs font-bold text-slate-500">Virtual Partner Active</span>
-          </div>
-        </div>
-        
-        <button onClick={() => setIsNoiseActive(!isNoiseActive)} className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-colors ${isNoiseActive ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-white border-slate-200 text-slate-500'}`}>
-          {isNoiseActive ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-          <span className="text-sm font-semibold">{isNoiseActive ? "Brown Noise ON" : "Soundscape OFF"}</span>
-        </button>
-      </div>
+      <div className="max-w-2xl w-full text-center">
+        <span className="text-[10px] font-black tracking-[0.3em] uppercase text-teal-600 mb-4 block">
+          Focus Protocol Initialized
+        </span>
+        <h2 className="text-5xl font-display italic text-slate-900 mb-12 leading-tight">
+          {task.text}
+        </h2>
 
-      <div className="flex-1 flex flex-col items-center justify-between p-8 relative overflow-hidden">
-        <div className="flex-1 w-full flex flex-col items-center justify-center">
-          <div className="max-w-md w-full flex flex-col items-center text-center z-10">
-              <h2 className="text-2xl font-bold text-slate-800 leading-relaxed mb-10">{task.text}</h2>
-              
-              <TimeSweep totalSeconds={totalTime} remainingSeconds={timeLeft} />
-
-              <div className="flex flex-col gap-4 items-center mt-6 w-full max-w-sm">
-                <div className="flex gap-4 w-full">
-                  <button onClick={() => setIsRunning(!isRunning)} className="w-16 h-16 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-colors" aria-label={isRunning ? "Pause focus timer" : "Resume focus timer"}>
-                    {isRunning ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
-                  </button>
-                  <button onClick={() => {
-                      const base = 15;
-                      const multiplier = (Math.random() < 0.15) ? 4 : (0.8 + Math.random() * 0.4);
-                      onComplete(Math.floor(base * multiplier));
-                    }}
-                    className="flex-1 py-5 bg-teal-600 text-white font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-teal-700 shadow-md shadow-teal-600/20 transition-all"
-                  >
-                    <Check className="w-6 h-6" strokeWidth={3} /> Complete
-                  </button>
-                </div>
-                
-                {totalTime > 300 && (
-                  <button onClick={setMicroSprint} className="flex items-center justify-center gap-2 w-full py-3 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors">
-                    <Zap className="w-4 h-4" />
-                    <span className="font-semibold text-sm">Paralyzed? Just do 5 minutes instead.</span>
-                  </button>
-                )}
-              </div>
+        <div className="relative inline-block mb-16">
+          <svg className="w-80 h-80 transform -rotate-90">
+            <circle
+              cx="160"
+              cy="160"
+              r="150"
+              stroke="currentColor"
+              strokeWidth="4"
+              fill="transparent"
+              className="text-slate-100"
+            />
+            <motion.circle
+              cx="160"
+              cy="160"
+              r="150"
+              stroke="currentColor"
+              strokeWidth="8"
+              fill="transparent"
+              className="text-teal-500"
+              strokeDasharray="942"
+              animate={{
+                strokeDashoffset: 942 - (timeLeft / defaultSeconds) * 942,
+              }}
+              transition={{ duration: 1, ease: "linear" }}
+              strokeLinecap="round"
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-7xl font-black tracking-tighter text-slate-900 tabular-nums">
+              {Math.floor(timeLeft / 60)}:
+              {(timeLeft % 60).toString().padStart(2, "0")}
+            </span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
+              {task.effort || "Standard"} Session
+            </span>
           </div>
         </div>
 
-        <div className="w-full max-w-md mt-auto pt-8 border-t border-slate-100">
-           <form onSubmit={handleDistractionSubmit} className="relative group">
-             <div className="absolute -top-6 left-2 flex items-center gap-1.5 opacity-0 group-focus-within:opacity-100 transition-opacity">
-                <Inbox className="w-3.5 h-3.5 text-slate-400" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Distraction Catcher</span>
-             </div>
-             <input
-               type="text" value={distraction} onChange={e=>setDistraction(e.target.value)}
-               placeholder="Thought popped up? Type it here, don't leave."
-               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3.5 text-sm text-slate-700 focus:outline-none focus:border-teal-500 focus:ring-4 ring-teal-500/10 transition-all"
-             />
-             <AnimatePresence>
-               {showDistractionSuccess && (
-                 <motion.div initial={{opacity:0, scale:0.8}} animate={{opacity:1, scale:1}} exit={{opacity:0}} className="absolute right-3 top-1/2 -translate-y-1/2 text-teal-500 font-bold text-xs bg-teal-50 px-2 py-1 rounded-md">
-                   Saved to Archive!
-                 </motion.div>
-               )}
-             </AnimatePresence>
-           </form>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-// 3. Emergency Mode
-function EmergencyMode({ onClose }: { onClose: () => void }) {
-  const gentleTasks = [
-    "Drink a glass of water right now.",
-    "Take 3 deep, slow breaths.",
-    "Stand up and stretch your arms for 10 seconds.",
-    "Step outside or look out a window for 1 minute.",
-    "Wash your face with cold water for a sensory reset."
-  ];
-  const [task, setTask] = useState(gentleTasks[0]);
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-[200] bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
-      <LifeBuoy className="w-16 h-16 text-teal-400 mb-8 opacity-60" />
-      <h2 className="text-xl mb-6 font-medium text-slate-300">Executive function offline? That is completely okay.</h2>
-      <p className="text-3xl md:text-4xl font-bold text-white max-w-2xl leading-relaxed mb-16">{task}</p>
-      
-      <div className="flex flex-col gap-4 w-full max-w-xs">
-         <button onClick={() => setTask(gentleTasks[Math.floor(Math.random()*gentleTasks.length)])} className="py-4 border border-slate-700 rounded-2xl text-slate-400 hover:bg-slate-800 transition-colors font-medium">
-           Give me a different one
-         </button>
-         <button onClick={onClose} className="py-4 bg-teal-600 text-white font-bold rounded-2xl shadow-lg shadow-teal-600/20 hover:bg-teal-500 transition-colors">
-           I'm ready to return
-         </button>
-      </div>
-    </motion.div>
-  );
-}
-
-// Habit Editor Overlay
-function HabitFormOverlay({
-  initialHabit, onSave, onClose, onDelete, categories, createCategory
-}: {
-  initialHabit: Habit | null | 'new'; onSave: (habitData: { name: string; categoryId: string | null; tiers: { mini: string; plus: string; elite: string } }) => void; onClose: () => void; onDelete: () => void;
-  categories: Category[]; createCategory: (name: string, color: string) => Category;
-}) {
-  const isEditing = initialHabit && initialHabit !== 'new';
-  const data = isEditing ? (initialHabit as Habit) : null;
-  const [name, setName] = useState(data?.name || '');
-  const [categoryId, setCategoryId] = useState<string>(data?.categoryId || '');
-  const [mini, setMini] = useState(data?.tiers.mini || '');
-  const [plus, setPlus] = useState(data?.tiers.plus || '');
-  const [elite, setElite] = useState(data?.tiers.elite || '');
-  
-  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
-  const [newCatName, setNewCatName] = useState('');
-  const [newCatColor, setNewCatColor] = useState(TAILWIND_COLORS[0]);
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[150] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: -20 }} className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl relative overflow-y-auto max-h-[90vh]">
-        <button onClick={onClose} className="absolute right-6 top-6 text-slate-400 hover:text-slate-600 bg-slate-50 p-2 rounded-full transition-colors focus:ring-2 ring-teal-500">
-          <X className="w-5 h-5"/>
-        </button>
-        <h2 className="text-2xl font-bold text-slate-800 mb-6">{isEditing ? 'Edit Habit' : 'New Elastic Habit'}</h2>
-        
-        <div className="flex flex-col gap-5">
-          <div>
-            <label className="text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1.5 block ml-1">Habit Name</label>
-            <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Exercise, Reading, Water" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 font-semibold focus:outline-none focus:border-teal-500 focus:bg-white transition-colors placeholder:font-normal"/>
-          </div>
-
-          <div>
-             <label className="text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1.5 block ml-1">Category</label>
-             {!isCreatingCategory ? (
-                <select value={categoryId} onChange={e => {
-                   if (e.target.value === 'NEW') setIsCreatingCategory(true);
-                   else setCategoryId(e.target.value);
-                }} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:border-teal-500 focus:bg-white transition-colors">
-                  <option value="">No Category</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  <option value="NEW">+ Create New Category</option>
-                </select>
-             ) : (
-                <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl flex flex-col gap-3">
-                   <div className="flex items-center justify-between">
-                     <span className="text-sm font-semibold text-slate-700">New Category</span>
-                     <button onClick={() => setIsCreatingCategory(false)} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>
-                   </div>
-                   <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="e.g. Wellness" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500"/>
-                   <div className="flex gap-2">
-                     {TAILWIND_COLORS.map(color => (
-                        <button key={color} onClick={() => setNewCatColor(color)} className={`w-6 h-6 rounded-full border-2 ${color} ${newCatColor === color ? 'ring-2 ring-slate-400 ring-offset-2' : ''}`}></button>
-                     ))}
-                   </div>
-                </div>
-             )}
-          </div>
-
-          <div className="p-4 bg-teal-50/50 rounded-2xl border border-teal-100 flex flex-col gap-4">
-            <div>
-              <label className="text-[11px] font-bold text-teal-600/70 tracking-wider uppercase mb-1.5 block ml-1">Tier 1: Mini (Low Energy Day)</label>
-              <input value={mini} onChange={e=>setMini(e.target.value)} placeholder="e.g. Put on running shoes" className="w-full bg-white border border-teal-100 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:border-teal-400 transition-colors"/>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-teal-600/70 tracking-wider uppercase mb-1.5 block ml-1">Tier 2: Plus (Standard Day)</label>
-              <input value={plus} onChange={e=>setPlus(e.target.value)} placeholder="e.g. 10 minute walk" className="w-full bg-white border border-teal-100 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:border-teal-400 transition-colors"/>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-teal-600/70 tracking-wider uppercase mb-1.5 block ml-1">Tier 3: Elite (High Energy Day)</label>
-              <input value={elite} onChange={e=>setElite(e.target.value)} placeholder="e.g. 45 min gym session" className="w-full bg-white border border-teal-100 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:border-teal-400 transition-colors"/>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-4 mt-8 pt-6 border-t border-slate-100">
-          {isEditing && (
-            <button onClick={onDelete} className="px-4 py-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors" title="Delete Habit">
-              <Trash2 className="w-5 h-5"/>
-            </button>
-          )}
-          <button 
-            disabled={!name.trim() || !mini.trim() || (isCreatingCategory && !newCatName.trim())} 
-            onClick={() => {
-              if(name.trim() && mini.trim()) {
-                let finalCategoryId = categoryId;
-                if (isCreatingCategory && newCatName.trim()) {
-                   const newCat = createCategory(newCatName.trim(), newCatColor);
-                   finalCategoryId = newCat.id;
-                }
-                
-                onSave({
-                  name: name.trim(), 
-                  categoryId: finalCategoryId || null,
-                  tiers: {
-                    mini: mini.trim(), 
-                    plus: plus.trim() || mini.trim(), 
-                    elite: elite.trim() || plus.trim() || mini.trim()
-                  }
-                });
-              }
-            }}
-            className="flex-1 px-4 py-3 bg-teal-600 text-white font-bold rounded-xl hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        <div className="flex gap-6 justify-center">
+          <button
+            onClick={() => setIsRunning(!isRunning)}
+            className="w-20 h-20 rounded-3xl bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-all shadow-xl hover:scale-105 active:scale-95"
           >
-            Save Habit
+            {isRunning ? (
+              <Pause className="w-8 h-8" />
+            ) : (
+              <Play className="w-8 h-8 ml-1" />
+            )}
+          </button>
+          <button
+            onClick={onComplete}
+            className="px-10 h-20 bg-teal-600 text-white font-black text-xs uppercase tracking-widest rounded-3xl flex items-center gap-4 hover:bg-teal-700 transition-all shadow-2xl shadow-teal-600/30 hover:scale-105 active:scale-95"
+          >
+            <Check className="w-6 h-6" strokeWidth={3} /> Complete Deep Work
           </button>
         </div>
-      </motion.div>
+      </div>
     </motion.div>
   );
 }
 
-// 4. Task Item Component
-function TaskCard({ 
-  task, availableTasks, onComplete, onDelete, onStatusChange, onEnterHyperfocus, onAddSubtask, onToggleSubtask, onSetEffort, onSetPriority, onUpdateDependencies, onUpdateRecurring
-}: { 
-  key?: string | number,
-  task: Task; 
-  availableTasks: Task[];
-  onComplete: () => void; onDelete: () => void; onStatusChange: (status: 'today' | 'backlog') => void;
-  onEnterHyperfocus: () => void; onAddSubtask: (text: string) => void; onToggleSubtask: (subId: string) => void; onSetEffort: (effort: EffortSize | null) => void;
-  onSetPriority: (priority: 'high' | 'medium' | 'low' | null) => void;
-  onUpdateDependencies: (deps: string[]) => void;
-  onUpdateRecurring: (recurring: RecurringConfig | null) => void;
+// 3. Task Item Component
+function TaskCard({
+  task,
+  allTasks,
+  onComplete,
+  onDelete,
+  onStatusChange,
+  onEnterFocus,
+  onAddSubtask,
+  onToggleSubtask,
+  onSetEnergy,
+  onSetPriority,
+  onUpdateNote,
+  onToggleDependency,
+  onPromote,
+  onGrabEarly,
+  onUpdateRecurring,
+  onSetDeadline,
+  activationWeight,
+}: {
+  task: Task;
+  allTasks: Task[];
+  onComplete: () => void;
+  onDelete: () => void;
+  onStatusChange: (status: TaskStatus) => void;
+  onEnterFocus: () => void;
+  onAddSubtask: (text: string) => void;
+  onToggleSubtask: (subId: string) => void;
+  onSetEnergy: (effort: EffortSize | null) => void;
+  onSetPriority: (priority: TaskPriority) => void;
+  onUpdateNote: (note: string) => void;
+  onToggleDependency: (depId: string) => void;
+  onPromote: () => void;
+  onGrabEarly: () => void;
+  onUpdateRecurring: (frequency: RecurringFrequency, days: number[]) => void;
+  onSetDeadline: (deadline: number | null) => void;
+  activationWeight: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [subInput, setSubInput] = useState('');
+  const [subInput, setSubInput] = useState("");
+  const [showClosure, setShowClosure] = useState(false);
+  const [closureNote, setClosureNote] = useState("");
+  const [showDependencySelector, setShowDependencySelector] = useState(false);
 
   const submitSubtask = (e: React.FormEvent) => {
     e.preventDefault();
     if (subInput.trim()) {
       onAddSubtask(subInput.trim());
-      setSubInput('');
+      setSubInput("");
     }
   };
 
-  const priorityColors = {
-    high: 'text-rose-600 bg-rose-50 border-rose-200',
-    medium: 'text-amber-600 bg-amber-50 border-amber-200',
-    low: 'text-slate-600 bg-slate-100 border-slate-200',
+  const priorityStyles = {
+    primary: "text-rose-600 bg-rose-50 border-rose-200",
+    secondary: "text-amber-600 bg-amber-50 border-amber-200",
+    normal: "text-slate-500 bg-slate-50 border-slate-100",
   };
 
-  const activeDependencies = task.dependencies?.map(dId => availableTasks.find(t => t.id === dId)).filter(t => t && !t.completed) || [];
-  const isBlocked = activeDependencies.length > 0;
+  const hasIncompleteSubtasks = (task.subtasks || []).some((s) => !s.completed);
 
-  const validLinkTargets = availableTasks.filter(t => t.id !== task.id && !t.completed && !task.dependencies?.includes(t.id));
+  // Dependency Logic
+  const blockingTasks = allTasks.filter(
+    (t) => task.dependencyIds?.includes(t.id) && !t.completed,
+  );
+  const isBlocked = blockingTasks.length > 0;
+
+  const cannotComplete = hasIncompleteSubtasks || isBlocked;
+
+  const todayStart = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    new Date().getDate(),
+  ).getTime();
+  const isMissedFocus =
+    task.status === "focus" &&
+    !task.completed &&
+    task.focusDate &&
+    task.focusDate < todayStart;
+
+  const handleComplete = () => {
+    if (task.completed) {
+      onComplete(); // Undo toggle
+    } else {
+      setShowClosure(true); // Page 5: Closing Ritual
+    }
+  };
+
+  const finishClosure = () => {
+    onUpdateNote(
+      task.note
+        ? `${task.note}\n\n[EVIDENCE]: ${closureNote}`
+        : `[EVIDENCE]: ${closureNote}`,
+    );
+    onComplete();
+    setShowClosure(false);
+  };
 
   return (
-    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className={`bg-white rounded-[2rem] p-5 shadow-sm border ${task.status === 'today' ? 'border-teal-100 hover:border-teal-200' : 'border-slate-100 hover:border-slate-200'} transition-all ${isBlocked ? 'opacity-70 grayscale-[0.2]' : ''}`}>
-      <div className="flex gap-4 items-start">
-        <button disabled={isBlocked} onClick={onComplete} aria-label="Complete task" className={`mt-1 w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-colors shrink-0 ${isBlocked ? 'border-slate-200 bg-slate-50 cursor-not-allowed' : 'border-slate-200 hover:border-teal-500 hover:bg-teal-50'}`}>
-          {task.completed ? <Check className="w-4 h-4 text-teal-600" strokeWidth={3} /> : (isBlocked ? <div className="w-2 h-2 rounded-full bg-slate-300"></div> : null)}
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className={`glass p-4 md:p-6 rounded-[2.5rem] shadow-xl hover:shadow-2xl transition-all duration-300 border-white/50 group/card relative overflow-hidden ${isBlocked && !task.completed ? "opacity-80" : ""}`}
+    >
+      {/* Blocked Overlay Pattern */}
+      {isBlocked && !task.completed && (
+        <div
+          className="absolute inset-0 bg-slate-50/10 pointer-events-none z-0"
+          style={{
+            backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)",
+            backgroundSize: "24px 24px",
+          }}
+        />
+      )}
+
+      {/* Background weight indicator (Novelty/INCUP) */}
+      <div className="absolute top-0 right-0 p-3 opacity-10">
+        <span className="text-[40px] font-black italic text-slate-400">
+          {Math.round(activationWeight * 10)}
+        </span>
+      </div>
+
+      <div className="flex gap-5 items-start relative z-10">
+        <button
+          disabled={cannotComplete}
+          onClick={handleComplete}
+          aria-label="Complete task"
+          className={`mt-1.5 w-8 h-8 rounded-xl border-2 flex items-center justify-center transition-all shrink-0 shadow-sm ${cannotComplete ? "border-slate-100 bg-slate-50/50 cursor-not-allowed text-slate-300" : "border-slate-200 bg-white hover:border-teal-500 hover:bg-teal-50 hover:scale-110 active:scale-95"}`}
+        >
+          {task.completed ? (
+            <Check className="w-5 h-5 text-teal-600" strokeWidth={3} />
+          ) : isBlocked ? (
+            <Clock className="w-4 h-4 text-slate-300" />
+          ) : null}
         </button>
-        
-        <div className="flex-1 flex flex-col cursor-pointer" onClick={() => setExpanded(!expanded)}>
-           <div className="flex items-center gap-2">
-             <span className={`text-lg font-bold leading-snug ${isBlocked ? 'text-slate-500' : 'text-slate-800'}`}>{task.text}</span>
-             {task.priority && (
-                <span className={`text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded border ${priorityColors[task.priority]} shrink-0 mt-0.5`}>
-                  {task.priority} Priority
+
+        <div
+          className="flex-1 flex flex-col cursor-pointer"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="flex items-center gap-2 flex-wrap min-h-[32px]">
+            <span
+              className={`text-xl font-bold tracking-tight ${task.completed ? "text-slate-400" : "text-slate-900"} group-hover/card:text-teal-700 transition-colors`}
+            >
+              {task.text}
+            </span>
+            {isBlocked && !task.completed && (
+              <span className="text-[9px] font-black tracking-[0.1em] uppercase px-2.5 py-1 rounded-lg border bg-slate-900 text-white shadow-sm shrink-0 flex items-center gap-1.5">
+                <Pause className="w-2.5 h-2.5" /> Blocked
+              </span>
+            )}
+            {task.priority && (
+              <span
+                className={`text-[9px] font-black tracking-[0.1em] uppercase px-2.5 py-1 rounded-lg border shadow-sm ${priorityStyles[task.priority]} shrink-0`}
+              >
+                {task.priority}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3 mt-3 flex-wrap">
+            {isBlocked && !task.completed && (
+              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                <ArrowUp className="w-3 h-3 text-slate-400" /> Needs:
+                <span className="text-slate-700 lowercase italic">
+                  {blockingTasks.map((t) => t.text).join(", ")}
                 </span>
-             )}
-             {isBlocked && (
-                <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-slate-200 bg-slate-100 text-slate-500 shrink-0 mt-0.5 flex items-center gap-1">
-                  Blocked
+              </div>
+            )}
+
+            {task.effort && (
+              <span className="text-[10px] font-bold text-teal-700 bg-teal-400/10 px-3 py-1.5 rounded-full border border-teal-400/20 shadow-sm uppercase tracking-wider">
+                {task.effort} • {EFFORT_MAP[task.effort]}m
+              </span>
+            )}
+
+            {/* Spoon Cost Display (Page 5) */}
+            <div className="flex gap-1.5">
+              {(
+                Object.entries(task.spoons || DEFAULT_SPOONS) as [
+                  SpoonType,
+                  number,
+                ][]
+              )
+                .filter((s) => s[1] > 0)
+                .map(([type, val]) => (
+                  <div
+                    key={type}
+                    className={`w-1.5 h-1.5 rounded-full ${type === "focus" ? "bg-indigo-400" : type === "social" ? "bg-rose-400" : type === "sensory" ? "bg-amber-400" : "bg-emerald-400"}`}
+                    title={`${type} cost: ${val}`}
+                  />
+                ))}
+            </div>
+
+            {task.subtasks && task.subtasks.length > 0 && (
+              <div className="flex items-center gap-2 bg-slate-100/50 px-3 py-1.5 rounded-full border border-slate-200/50">
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{
+                      width: `${(task.subtasks.filter((s) => s.completed).length / task.subtasks.length) * 100}%`,
+                    }}
+                    className="h-full bg-teal-500"
+                  />
+                </div>
+                <span className="text-[10px] font-black text-slate-500 tabular-nums">
+                  {task.subtasks.filter((s) => s.completed).length}/
+                  {task.subtasks.length}
                 </span>
-             )}
-             {task.recurring && (
-                <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-600 shrink-0 mt-0.5 flex items-center gap-1">
-                  <RefreshCw className="w-3 h-3" /> Repeating
-                </span>
-             )}
-           </div>
-           <div className="flex items-center gap-3 mt-2 flex-wrap">
-             {task.estimatedTime && (
-               <span className="text-xs font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-md mb-1">
-                 {task.estimatedTime} ({TIME_MAP[task.estimatedTime]}m)
-               </span>
-             )}
-             {task.subtasks && task.subtasks.length > 0 && (
-               <span className="text-xs font-medium text-slate-400 mb-1">
-                 {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length} subtasks
-               </span>
-             )}
-             {!expanded && isBlocked && (
-               <span className="text-xs font-medium text-amber-500 mb-1 flex items-center gap-1">
-                 Waiting on {activeDependencies.length} task{activeDependencies.length !== 1 ? 's' : ''}
-               </span>
-             )}
-             {!expanded && !isBlocked && <span className="text-xs text-slate-300 ml-auto mr-2">Tap to expand</span>}
-           </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          <button disabled={task.status === 'backlog' && isBlocked} onClick={(e) => { e.stopPropagation(); onStatusChange(task.status === 'today' ? 'backlog' : 'today'); }} className={`p-2 rounded-lg transition-colors ${task.status === 'backlog' && isBlocked ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'}`} title={task.status === 'today' ? "Move to Archive" : (isBlocked ? "Blocked: Cannot move to Today" : "Move to Today")}>
-            {task.status === 'today' ? <ArrowDown className="w-5 h-5" /> : <ArrowUp className="w-5 h-5" />}
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50" title="Delete task">
+          {task.status === "dump" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPromote();
+              }}
+              className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-lg"
+              title="Promote to Primary"
+            >
+              <Zap className="w-5 h-5" />
+            </button>
+          )}
+          {task.status === "upcoming" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onGrabEarly();
+              }}
+              className="p-2 text-teal-600 hover:bg-teal-50 rounded-lg"
+              title="Grab Early"
+            >
+              <Play className="w-5 h-5" />
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="p-2 text-slate-300 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+            title="Delete task"
+          >
             <Trash2 className="w-5 h-5" />
           </button>
         </div>
@@ -492,136 +560,317 @@ function TaskCard({
 
       <AnimatePresence>
         {expanded && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden mt-6 pt-5 border-t border-slate-100 flex flex-col gap-5">
-            <button disabled={isBlocked} onClick={onEnterHyperfocus} className={`w-full py-4 font-bold rounded-xl flex items-center justify-center gap-2 transition-colors ${isBlocked ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'}`}>
-              <Maximize2 className="w-5 h-5" /> Start Focus Room Session
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden mt-6 pt-5 border-t border-slate-100 flex flex-col gap-5"
+          >
+            <button
+              disabled={isBlocked}
+              onClick={onEnterFocus}
+              className={`w-full py-4 font-bold rounded-xl flex items-center justify-center gap-2 transition-colors ${isBlocked ? "bg-slate-100 text-slate-400 cursor-not-allowed" : "bg-teal-50 text-teal-700 hover:bg-teal-100"}`}
+            >
+              <Maximize2 className="w-5 h-5" />{" "}
+              {isBlocked ? "Task is currently Blocked" : "Start Focus Session"}
             </button>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-               <div className="flex flex-col gap-3">
-                  <span className="text-sm font-bold text-slate-600">Break it down</span>
-                  <div className="flex flex-col gap-2">
-                    {task.subtasks?.map(sub => (
-                       <div key={sub.id} className="flex items-start gap-3">
-                         <button onClick={() => onToggleSubtask(sub.id)} className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${sub.completed ? 'border-teal-500 bg-teal-500' : 'border-slate-300 hover:border-slate-400'}`}>
-                           {sub.completed && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                         </button>
-                         <span className={`text-base ${sub.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{sub.text}</span>
-                       </div>
-                    ))}
-                  </div>
-                  <form onSubmit={submitSubtask} className="flex mt-2">
-                    <input type="text" placeholder="Add a micro-step..." value={subInput} onChange={e => setSubInput(e.target.value)} className="bg-transparent border-b border-slate-200 pb-2 text-base text-slate-700 focus:outline-none focus:border-teal-500 w-full placeholder:text-slate-400" />
-                  </form>
-               </div>
-
-               <div className="flex flex-col gap-3">
-                  <span className="text-sm font-bold text-slate-600">Estimate Effort</span>
-                  <div className="flex flex-col gap-2">
-                    {(['short', 'medium', 'deep'] as EffortSize[]).map(size => (
-                      <button key={size} onClick={() => onSetEffort(task.estimatedTime === size ? null : size)} className={`py-3 px-4 font-semibold text-sm rounded-xl border text-left transition-colors ${task.estimatedTime === size ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-                        {size.charAt(0).toUpperCase() + size.slice(1)} Task ({TIME_MAP[size]} mins)
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+              <div className="flex flex-col gap-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                  Subtasks
+                </span>
+                <div className="flex flex-col gap-2">
+                  {task.subtasks?.map((sub) => (
+                    <div
+                      key={sub.id}
+                      className="flex items-start gap-3 group/sub"
+                    >
+                      <button
+                        onClick={() => onToggleSubtask(sub.id)}
+                        className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${sub.completed ? "border-teal-500 bg-teal-500 shadow-lg shadow-teal-500/20" : "border-slate-300 hover:border-slate-400 bg-white"}`}
+                      >
+                        {sub.completed && (
+                          <Check
+                            className="w-3 h-3 text-white"
+                            strokeWidth={3}
+                          />
+                        )}
                       </button>
-                    ))}
-                  </div>
-               </div>
+                      <span
+                        className={`text-sm font-semibold transition-colors ${sub.completed ? "text-slate-400 line-through" : "text-slate-700"}`}
+                      >
+                        {sub.text}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <form onSubmit={submitSubtask} className="flex mt-2">
+                  <input
+                    type="text"
+                    placeholder="Add a micro-step..."
+                    value={subInput}
+                    onChange={(e) => setSubInput(e.target.value)}
+                    className="bg-transparent border-b border-slate-200 pb-2 text-sm text-slate-700 focus:outline-none focus:border-teal-500 w-full placeholder:text-slate-400 font-bold"
+                  />
+                </form>
+              </div>
 
-               <div className="flex flex-col gap-3">
-                  <span className="text-sm font-bold text-slate-600">Set Priority</span>
-                  <div className="flex flex-col gap-2">
-                    {(['high', 'medium', 'low'] as const).map(p => (
-                      <button key={p} onClick={() => onSetPriority(task.priority === p ? null : p)} className={`py-3 px-4 font-semibold text-sm rounded-xl border text-left transition-colors flex items-center gap-2 ${task.priority === p ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
-                         <div className={`w-3 h-3 rounded-full ${p === 'high' ? 'bg-rose-500' : p === 'medium' ? 'bg-amber-500' : 'bg-slate-400'}`}></div>
-                         {p.charAt(0).toUpperCase() + p.slice(1)} Priority
+              <div className="flex flex-col gap-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                  Prerequisites
+                </span>
+                <div className="flex flex-col gap-2">
+                  {task.dependencyIds?.map((id) => {
+                    const dep = allTasks.find((t) => t.id === id);
+                    if (!dep) return null;
+                    return (
+                      <div
+                        key={id}
+                        className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100"
+                      >
+                        <span
+                          className={`text-xs font-bold line-clamp-1 ${dep.completed ? "text-slate-400 line-through" : "text-slate-700"}`}
+                        >
+                          {dep.text}
+                        </span>
+                        <button
+                          onClick={() => onToggleDependency(id)}
+                          className="text-slate-400 hover:text-red-500"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button
+                    onClick={() =>
+                      setShowDependencySelector(!showDependencySelector)
+                    }
+                    className="py-2 text-[10px] font-black uppercase tracking-widest text-teal-600 hover:text-teal-700 transition-colors flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3 h-3" /> Add Linkage
+                  </button>
+                  {showDependencySelector && (
+                    <div className="flex flex-col gap-1 p-2 bg-slate-50 rounded-xl border border-slate-100 max-h-[150px] overflow-y-auto">
+                      {allTasks
+                        .filter(
+                          (t) =>
+                            t.id !== task.id &&
+                            !task.dependencyIds?.includes(t.id) &&
+                            !t.completed,
+                        )
+                        .map((t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => {
+                              onToggleDependency(t.id);
+                              setShowDependencySelector(false);
+                            }}
+                            className="text-left text-[11px] font-bold py-1.5 px-2 hover:bg-white rounded-md transition-colors text-slate-600 line-clamp-1 border border-transparent hover:border-slate-200"
+                          >
+                            {t.text}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                  Energy
+                </span>
+                <div className="flex flex-col gap-2">
+                  {(["quick", "standard", "deep"] as EffortSize[]).map(
+                    (size) => (
+                      <button
+                        key={size}
+                        onClick={() =>
+                          onSetEnergy(task.effort === size ? null : size)
+                        }
+                        className={`py-3 px-4 font-bold text-xs uppercase tracking-widest rounded-xl border text-left transition-all ${task.effort === size ? "bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/20" : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"}`}
+                      >
+                        {size} ({EFFORT_MAP[size]}m)
                       </button>
-                    ))}
-                  </div>
-               </div>
-
-               <div className="flex flex-col gap-3">
-                  <span className="text-sm font-bold text-slate-600">Dependencies</span>
+                    ),
+                  )}
+                </div>
+              </div>              <div className="flex flex-col gap-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                  Schedule Nature
+                </span>
+                <div className="flex flex-col gap-4">
                   <div className="flex flex-col gap-2">
-                     {activeDependencies.length > 0 && (
-                        <div className="flex flex-col gap-2 mb-2">
-                           {activeDependencies.map(dep => (
-                              <div key={dep.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-sm">
-                                 <span className="text-slate-600 truncate mr-2" title={dep.text}>{dep.text}</span>
-                                 <button onClick={() => onUpdateDependencies((task.dependencies||[]).filter(id => id !== dep.id))} className="text-slate-400 hover:text-red-500">
-                                    <X className="w-3.5 h-3.5" />
-                                 </button>
-                              </div>
-                           ))}
+                    <div className="flex gap-2">
+                      {(["daily", "weekly", "monthly"] as RecurringFrequency[]).map(
+                        (freq) => (
+                          <button
+                            key={freq}
+                            onClick={() =>
+                              onUpdateRecurring(freq, task.recurringRules?.days || [])
+                            }
+                            className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg border transition-all ${task.nature === "recurring" && task.recurringRules?.frequency === freq ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"}`}
+                          >
+                            {freq}
+                          </button>
+                        ),
+                      )}
+                      {task.nature === "recurring" && (
+                        <button
+                          onClick={() => {
+                            setTasks((prev) =>
+                              prev.map((t) =>
+                                t.id === task.id
+                                  ? {
+                                      ...t,
+                                      nature: "one-time",
+                                      recurringRules: undefined,
+                                    }
+                                  : t,
+                              ),
+                            );
+                          }}
+                          className="px-3 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 transition-all"
+                        >
+                          X
+                        </button>
+                      )}
+                    </div>
+
+                    {task.nature === "recurring" &&
+                      task.recurringRules?.frequency === "weekly" && (
+                        <div className="flex justify-between gap-1 mt-1">
+                          {["S", "M", "T", "W", "T", "F", "S"].map((day, i) => (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                const currentDays = task.recurringRules?.days || [];
+                                const newDays = currentDays.includes(i)
+                                  ? currentDays.filter((d) => d !== i)
+                                  : [...currentDays, i];
+                                onUpdateRecurring("weekly", newDays);
+                              }}
+                              className={`w-7 h-7 rounded-lg text-[10px] font-black flex items-center justify-center transition-all ${task.recurringRules?.days?.includes(i) ? "bg-teal-500 text-white shadow-lg shadow-teal-500/20" : "bg-slate-100 text-slate-400 hover:bg-slate-200"}`}
+                            >
+                              {day}
+                            </button>
+                          ))}
                         </div>
-                     )}
-                     
-                     {validLinkTargets.length > 0 ? (
-                        <select 
-                           value="" 
-                           onChange={e => {
-                              if(e.target.value) {
-                                 onUpdateDependencies([...(task.dependencies||[]), e.target.value]);
-                              }
-                           }}
-                           className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none focus:border-indigo-400"
-                        >
-                           <option value="" disabled>+ Link blocking task</option>
-                           {validLinkTargets.map(t => (
-                              <option key={t.id} value={t.id}>{t.text.length > 30 ? t.text.substring(0,30) + '...' : t.text}</option>
-                           ))}
-                        </select>
-                     ) : (
-                        <span className="text-xs text-slate-400 font-medium italic">No other tasks to link.</span>
-                     )}
-                  </div>
-               </div>
+                      )}
 
-               <div className="flex flex-col gap-3">
-                  <span className="text-sm font-bold text-slate-600">Recurring Status</span>
+                    {task.nature === "recurring" &&
+                      task.recurringRules?.frequency === "monthly" && (
+                        <div className="grid grid-cols-7 gap-1 mt-1 p-2 bg-slate-50 rounded-xl">
+                          {Array.from({ length: 31 }, (_, i) => i + 1).map(
+                            (date) => (
+                              <button
+                                key={date}
+                                onClick={() => {
+                                  const currentDays =
+                                    task.recurringRules?.days || [];
+                                  const newDays = currentDays.includes(date)
+                                    ? currentDays.filter((d) => d !== date)
+                                    : [...currentDays, date];
+                                  onUpdateRecurring("monthly", newDays);
+                                }}
+                                className={`w-6 h-6 rounded-md text-[8px] font-black flex items-center justify-center transition-all ${task.recurringRules?.days?.includes(date) ? "bg-teal-500 text-white" : "bg-white text-slate-400 border border-slate-100"}`}
+                              >
+                                {date}
+                              </button>
+                            ),
+                          )}
+                        </div>
+                      )}
+                  </div>
+
                   <div className="flex flex-col gap-2">
-                     <select 
-                        value={task.recurring?.frequency || ""}
-                        onChange={e => {
-                           const val = e.target.value;
-                           if (!val) {
-                              onUpdateRecurring(null);
-                           } else {
-                              onUpdateRecurring({ frequency: val as any, dayOfWeek: 0, dateOfMonth: 1 });
-                           }
+                    <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
+                      Target Deadline
+                    </span>
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={
+                          task.deadline
+                            ? new Date(task.deadline).toISOString().split("T")[0]
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          onSetDeadline(val ? new Date(val).getTime() : null);
                         }}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none focus:border-indigo-400"
-                     >
-                        <option value="">Doesn't repeat</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                     </select>
-
-                     {task.recurring?.frequency === 'weekly' && (
-                        <select 
-                           value={task.recurring.dayOfWeek?.toString() || "0"}
-                           onChange={e => onUpdateRecurring({...task.recurring!, dayOfWeek: parseInt(e.target.value)})}
-                           className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none focus:border-indigo-400"
+                        className="flex-1 px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 ring-indigo-500/20"
+                      />
+                      {task.deadline && (
+                        <button
+                          onClick={() => onSetDeadline(null)}
+                          className="px-3 py-2 bg-rose-50 text-rose-500 border border-rose-100 rounded-xl text-[10px] font-black uppercase tracking-widest"
                         >
-                           {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day, idx) => (
-                              <option key={idx} value={idx}>On {day}s</option>
-                           ))}
-                        </select>
-                     )}
-
-                     {task.recurring?.frequency === 'monthly' && (
-                        <select 
-                           value={task.recurring.dateOfMonth?.toString() || "1"}
-                           onChange={e => onUpdateRecurring({...task.recurring!, dateOfMonth: parseInt(e.target.value)})}
-                           className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 focus:outline-none focus:border-indigo-400"
-                        >
-                           {Array.from({length: 31}, (_, i) => i + 1).map(date => (
-                              <option key={date} value={date}>On the {date}{[1,21,31].includes(date)?'st':[2,22].includes(date)?'nd':[3,23].includes(date)?'rd':'th'}</option>
-                           ))}
-                        </select>
-                     )}
+                          Clear
+                        </button>
+                      )}
+                    </div>
                   </div>
-               </div>
+                </div>
+              </div>
+            </div>
 
+            <div className="flex flex-col gap-3 mt-2">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                Perspective
+              </span>
+              <textarea
+                value={task.note || ""}
+                onChange={(e) => onUpdateNote(e.target.value)}
+                placeholder="Capture nuance or context..."
+                className="w-full bg-slate-50/50 p-4 rounded-2xl text-sm font-semibold text-slate-700 focus:outline-none border border-slate-200/50 placeholder:text-slate-300 min-h-[100px] resize-none"
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* EVIDENCE VAULT: Closing Ritual Overlay (Page 5) */}
+      <AnimatePresence>
+        {showClosure && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-white backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center"
+          >
+            <div className="mb-6">
+              <div className="w-16 h-16 bg-teal-100 rounded-2xl flex items-center justify-center text-teal-600 mb-4 mx-auto">
+                <Sparkles className="w-8 h-8" />
+              </div>
+              <h4 className="text-xl font-black italic tracking-tighter">
+                Closing Ritual
+              </h4>
+              <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">
+                Prove it is done to silence the mind
+              </p>
+            </div>
+            <textarea
+              autoFocus
+              placeholder="Write one sentence of proof... (e.g. 'Sent the email to HR')"
+              className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-semibold focus:outline-none border border-slate-200 mb-6 min-h-[80px]"
+              value={closureNote}
+              onChange={(e) => setClosureNote(e.target.value)}
+            />
+            <div className="flex gap-4 w-full">
+              <button
+                onClick={() => setShowClosure(false)}
+                className="flex-1 py-3 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={finishClosure}
+                className="flex-[2] py-4 bg-teal-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-teal-600/20"
+              >
+                Seal Evidence
+              </button>
             </div>
           </motion.div>
         )}
@@ -630,862 +879,845 @@ function TaskCard({
   );
 }
 
-// 5. Visual Achievement Garden Component
-function VisualGarden({ sunlight }: { sunlight: number }) {
-  const plantCount = Math.min(Math.floor(sunlight / 30), 10);
-  const elements = [];
-  
-  for (let i = 0; i < plantCount; i++) {
-    if (i % 3 === 0) elements.push(<TreePine key={i} className="text-teal-600 w-8 h-8 drop-shadow-sm" />);
-    else if (i % 2 === 0) elements.push(<Flower2 key={i} className="text-pink-400 w-6 h-6 mb-1 drop-shadow-sm" />);
-    else elements.push(<Sprout key={i} className="text-teal-400 w-5 h-5 mb-1" />);
+// 4. TRIAGE QUIZ COMPONENT (Page 2)
+function TriageQuiz({
+  tasks,
+  onComplete,
+}: {
+  tasks: Task[];
+  onComplete: () => void;
+}) {
+  const [index, setIndex] = useState(0);
+  const current = tasks[index];
+
+  if (index >= tasks.length) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex flex-col items-center gap-6"
+      >
+        <div className="w-20 h-20 bg-teal-500 rounded-full flex items-center justify-center text-white shadow-2xl">
+          <Check className="w-10 h-10" />
+        </div>
+        <h2 className="text-3xl font-black italic">Triage Complete</h2>
+        <button
+          onClick={onComplete}
+          className="px-12 py-4 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest"
+        >
+          Return to Command
+        </button>
+      </motion.div>
+    );
   }
 
   return (
-    <div className="flex items-end gap-3 h-10 px-4 min-w-[200px]">
+    <div className="max-w-xl w-full text-center">
+      <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-4 block">
+        Triage Protocol active: {index + 1}/{tasks.length}
+      </span>
+      <h2 className="text-4xl font-display font-black italic text-slate-900 mb-12 leading-tight">
+        "{current.text}"
+      </h2>
+
+      <div className="grid grid-cols-1 gap-4">
+        <button
+          onClick={() => setIndex((i) => i + 1)}
+          className="group p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] hover:border-teal-500 hover:bg-teal-50 transition-all text-left"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-teal-100 rounded-2xl flex items-center justify-center text-teal-600 group-hover:scale-110 transition-transform">
+              <Zap className="w-6 h-6" />
+            </div>
+            <div>
+              <h5 className="font-black text-slate-900">Execute Today</h5>
+              <p className="text-xs font-bold text-slate-400 uppercase mt-1">
+                Add to surgical focus
+              </p>
+            </div>
+          </div>
+        </button>
+
+        <button
+          onClick={() => setIndex((i) => i + 1)}
+          className="group p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] hover:border-indigo-500 hover:bg-indigo-50 transition-all text-left"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
+              <Clock className="w-6 h-6" />
+            </div>
+            <div>
+              <h5 className="font-black text-slate-900">Leave in Dump</h5>
+              <p className="text-xs font-bold text-slate-400 uppercase mt-1">
+                Requires more gestation
+              </p>
+            </div>
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// --- Main Application ---
+export default function App() {
+  const [tasks, setTasks] = useLocalStorage<Task[]>("ff_v3_tasks", []);
+
+  const [activeView, setActiveView] = useState<
+    "focus" | "primary" | "upcoming" | "dump" | "archive"
+  >("focus");
+  const [captureInput, setCaptureInput] = useState("");
+  const [captureIsPrimary, setCaptureIsPrimary] = useState(false);
+  const [captureDeadline, setCaptureDeadline] = useState("");
+  const [captureNature, setCaptureNature] = useState<TaskNature>("one-time");
+  const [captureFreq, setCaptureFreq] = useState<RecurringFrequency>("daily");
+  const [captureDays, setCaptureDays] = useState<number[]>([]);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [isTriageMode, setIsTriageMode] = useState(false);
+  const [focusTask, setFocusTask] = useState<Task | null>(null);
+  const [showMissedPopup, setShowMissedPopup] = useState(false);
+
+  // --- FOCUSFLOW ENGINE: State Transitions ---
+  useEffect(() => {
+    const now = new Date();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    ).getTime();
+
+    setTasks((prev) => {
+      let changed = false;
+      const updated = prev.map((task) => {
+        let newStatus = task.status;
+        let newFocusDate = task.focusDate;
+
+        // 1. Missed Focus Detection (Yesterday's Focus not completed)
+        if (
+          task.status === "focus" &&
+          !task.completed &&
+          task.focusDate &&
+          task.focusDate < todayStart
+        ) {
+          // Keep in Focus but we will trigger the popup
+          // Or we can flag it. For now, let's just use focusDate logic to show popup.
+        }
+
+        // 2. Primary -> Focus (If deadline is today or before)
+        if (
+          task.status === "primary" &&
+          task.deadline &&
+          task.deadline <= todayStart + 86400000
+        ) {
+          newStatus = "focus";
+          newFocusDate = todayStart;
+          changed = true;
+        }
+
+        // 3. Upcoming (Recurring) -> Focus (If scheduled day is today)
+        if (
+          task.status === "upcoming" &&
+          task.nature === "recurring" &&
+          task.recurringRules
+        ) {
+          const rules = task.recurringRules;
+          let shouldTrigger = false;
+
+          if (rules.frequency === "daily") shouldTrigger = true;
+          if (
+            rules.frequency === "weekly" &&
+            rules.days?.includes(now.getDay())
+          )
+            shouldTrigger = true;
+          if (
+            rules.frequency === "monthly" &&
+            rules.days?.includes(now.getDate())
+          )
+            shouldTrigger = true;
+
+          if (shouldTrigger && task.focusDate !== todayStart) {
+            newStatus = "focus";
+            newFocusDate = todayStart;
+            changed = true;
+          }
+        }
+
+        if (newStatus !== task.status || newFocusDate !== task.focusDate) {
+          return { ...task, status: newStatus, focusDate: newFocusDate };
+        }
+        return task;
+      });
+
+      return changed ? updated : prev;
+    });
+
+    // Determine if popup should show
+    const yesterdayFocusMissed = tasks.some(
+      (t) =>
+        t.status === "focus" &&
+        !t.completed &&
+        t.focusDate &&
+        t.focusDate < todayStart,
+    );
+    if (yesterdayFocusMissed) setShowMissedPopup(true);
+  }, []); // Run once on mount
+
+  // States for Smart Capture / Voice
+  const [isListening, setIsListening] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  // INCUP Calculation: Heuristic-based novelty and urgency calculation
+  const getActivationWeight = (task: Task) => {
+    const ageDays =
+      (Date.now() - (task.createdAt || Date.now())) / (1000 * 60 * 60 * 24);
+    // Novelty boost for new tasks, then decay, then novelty boost for "forgotten" tasks
+    const noveltyFactor = ageDays < 1 ? 5 : ageDays > 7 ? 4 : 1;
+
+    // Safety check for legacy tasks without incup data
+    const incup = task.incup || {
+      interest: 3,
+      novelty: 3,
+      challenge: 2,
+      urgency: 1,
+      passion: 2,
+    };
+
+    return (
+      (incup.interest * INCUP_WEIGHTS.interest +
+        noveltyFactor * INCUP_WEIGHTS.novelty +
+        incup.urgency * INCUP_WEIGHTS.urgency +
+        incup.passion * INCUP_WEIGHTS.passion) /
+      10
+    );
+  };
+
+  const handleChaosStart = () => {
+    const startable = tasks.filter((t) => !t.completed && t.status === "focus");
+    if (startable.length > 0) {
+      const random = startable[Math.floor(Math.random() * startable.length)];
+      setFocusTask(random);
+    }
+  };
+
+  const handleSmartCapture = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!captureInput.trim()) return;
+
+    setIsProcessing(true);
+    const rawLines = captureInput
+      .split(/\r?\n|,/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    const deadlineTimestamp = captureDeadline
+      ? new Date(captureDeadline).getTime()
+      : captureIsPrimary
+        ? Date.now() + 86400000
+        : undefined;
+
+    const newTasks: Task[] = rawLines.map((text) => ({
+      id: crypto.randomUUID(),
+      text: text.charAt(0).toUpperCase() + text.slice(1),
+      completed: false,
+      createdAt: Date.now(),
+      lastInteractedAt: Date.now(),
+      status: captureIsPrimary
+        ? "primary"
+        : captureNature === "recurring"
+          ? "upcoming"
+          : "dump",
+      priority: captureIsPrimary ? "primary" : "normal",
+      nature: captureNature,
+      recurringRules:
+        captureNature === "recurring"
+          ? { frequency: captureFreq, days: captureDays }
+          : undefined,
+      deadline: deadlineTimestamp,
+      subtasks: [],
+      note: "",
+      effort: "standard",
+      spoons: { focus: 2, social: 1, sensory: 1, executive: 2 },
+      incup: { interest: 3, novelty: 5, challenge: 2, urgency: 1, passion: 2 },
+      dependencyIds: [],
+    }));
+
+    setTimeout(() => {
+      setTasks((prev) => [...newTasks, ...prev]);
+      setCaptureInput("");
+      setCaptureIsPrimary(false);
+      setCaptureDeadline("");
+      setCaptureNature("one-time");
+      setCaptureFreq("daily");
+      setCaptureDays([]);
+      setIsCapturing(false);
+      setIsProcessing(false);
+      // Triage Ritual: Trigger sorting if more than 3 new items
+      if (newTasks.length > 3) setIsTriageMode(true);
+    }, 400);
+  };
+
+  const handleToggleMic = () => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.lang = "en-US";
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setCaptureInput((prev) =>
+        (prev ? prev + " " + transcript : transcript).trim(),
+      );
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+    recognition.start();
+  };
+
+  // View Filtering
+  const filteredTasks = tasks.filter((t) => {
+    if (activeView === "archive") return t.completed;
+    if (t.completed) return false;
+
+    if (activeView === "focus") return t.status === "focus";
+    if (activeView === "primary") return t.status === "primary";
+    if (activeView === "upcoming") return t.status === "upcoming";
+    if (activeView === "dump") return t.status === "dump";
+    return true;
+  });
+
+  return (
+    <div className="min-h-screen bg-slate-50/20 text-slate-900 selection:bg-teal-100 selection:text-teal-900 overflow-x-hidden">
+      {/* Main Content Area */}
+      <main className="pt-12 md:pt-20 pb-48 px-6 md:px-12 max-w-5xl mx-auto w-full">
+        <div className="mb-12 md:mb-20">
+          <h2 className="text-4xl md:text-6xl font-black tracking-tighter text-slate-900 capitalize italic font-display leading-[0.9]">
+            {activeView === "focus"
+              ? "Surgical Focus"
+              : activeView === "dump"
+                ? "Mental Offloading"
+                : activeView === "archive"
+                  ? "Execution History"
+                  : activeView === "primary"
+                    ? "Primary Objectives"
+                    : "Upcoming Schedule"}
+          </h2>
+        </div>
+
+        {/* Task Columns / List */}
+        <div className="flex flex-col gap-10">
+          <AnimatePresence mode="popLayout">
+            {filteredTasks
+              .sort((a, b) => getActivationWeight(b) - getActivationWeight(a))
+              .map((task, idx) => (
+                <motion.div
+                  key={task.id}
+                  layout
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                >
+                  <TaskCard
+                    task={task}
+                    allTasks={tasks}
+                    onSetDeadline={(d) => {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id ? { ...t, deadline: d } : t,
+                        ),
+                      );
+                    }}
+                    onComplete={() => {
+                      const isCompleting = !task.completed;
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? {
+                                ...t,
+                                completed: isCompleting,
+                                completedAt: isCompleting
+                                  ? Date.now()
+                                  : undefined,
+                              }
+                            : t,
+                        ),
+                      );
+                    }}
+                    onDelete={() =>
+                      setTasks((prev) => prev.filter((t) => t.id !== task.id))
+                    }
+                    onStatusChange={(status) =>
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id ? { ...t, status } : t,
+                        ),
+                      )
+                    }
+                    onEnterFocus={() => setFocusTask(task)}
+                    onAddSubtask={(text) => {
+                      const newSub = {
+                        id: crypto.randomUUID(),
+                        text,
+                        completed: false,
+                      };
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? {
+                                ...t,
+                                subtasks: [...(t.subtasks || []), newSub],
+                              }
+                            : t,
+                        ),
+                      );
+                    }}
+                    onToggleSubtask={(subId) => {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? {
+                                ...t,
+                                subtasks: t.subtasks?.map((s) =>
+                                  s.id === subId
+                                    ? { ...s, completed: !s.completed }
+                                    : s,
+                                ),
+                              }
+                            : t,
+                        ),
+                      );
+                    }}
+                    onSetEnergy={(eff) =>
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id ? { ...t, effort: eff } : t,
+                        ),
+                      )
+                    }
+                    onSetPriority={(p) =>
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id ? { ...t, priority: p } : t,
+                        ),
+                      )
+                    }
+                    onUpdateNote={(note) =>
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id ? { ...t, note } : t,
+                        ),
+                      )
+                    }
+                    onToggleDependency={(depId) => {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? {
+                                ...t,
+                                dependencyIds: (t.dependencyIds || []).includes(
+                                  depId,
+                                )
+                                  ? t.dependencyIds.filter((id) => id !== depId)
+                                  : [...(t.dependencyIds || []), depId],
+                              }
+                            : t,
+                        ),
+                      );
+                    }}
+                    onPromote={() => {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? {
+                                ...t,
+                                status: "primary",
+                                deadline: Date.now() + 86400000 * 2,
+                              }
+                            : t,
+                        ),
+                      );
+                    }}
+                    onGrabEarly={() => {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? { ...t, status: "focus", focusDate: Date.now() }
+                            : t,
+                        ),
+                      );
+                    }}
+                    onUpdateRecurring={(frequency, days) => {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? {
+                                ...t,
+                                nature: "recurring",
+                                recurringRules: { frequency, days },
+                              }
+                            : t,
+                        ),
+                      );
+                    }}
+                  />
+                </motion.div>
+              ))}
+          </AnimatePresence>
+        </div>
+      </main>
+
+      {/* NAVIGATION DOCK: Orbital Navigation (Innovative Design) */}
+      <nav className="fixed bottom-6 md:bottom-12 inset-x-0 z-50 flex justify-center px-4">
+        <motion.div
+          layout
+          className="glass-heavy p-1.5 md:p-2.5 rounded-[2.5rem] md:rounded-[3rem] shadow-[0_50px_100px_rgba(0,0,0,0.1)] border-white/60 flex items-center gap-1 md:gap-2 max-w-full"
+        >
+          {[
+            { id: "focus", icon: Target, label: "Focus" },
+            { id: "primary", icon: Zap, label: "Primary" },
+            { id: "upcoming", icon: Clock, label: "Upcoming" },
+            { id: "dump", icon: Inbox, label: "Dump" },
+            { id: "archive", icon: Archive, label: "Done" },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveView(item.id as any)}
+              className={`relative px-4 py-3 md:px-8 md:py-5 rounded-[2rem] md:rounded-[2.5rem] flex items-center gap-2 md:gap-3 transition-all ${activeView === item.id ? "bg-slate-900 text-white shadow-xl" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"}`}
+            >
+              <item.icon className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">
+                {item.label}
+              </span>
+              {activeView === item.id && (
+                <motion.div
+                  layoutId="dock-indicator"
+                  className="absolute inset-0 bg-slate-900 rounded-[2rem] md:rounded-[2.5rem] -z-10"
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                />
+              )}
+            </button>
+          ))}
+          <div className="w-px h-6 md:h-10 bg-slate-200 mx-1 md:mx-2" />
+          <button
+            onClick={() => setIsCapturing(true)}
+            className="w-12 h-12 md:w-20 md:h-20 bg-teal-500 text-white rounded-full flex items-center justify-center shadow-xl shadow-teal-500/30 hover:scale-105 active:scale-95 transition-all group shrink-0"
+          >
+            <Plus className="w-6 h-6 md:w-8 md:h-8 group-hover:rotate-90 transition-transform" />
+          </button>
+        </motion.div>
+      </nav>
+
+      {/* Smart Capture Overlay */}
       <AnimatePresence>
-        {elements.length > 0 ? (
-          elements.map((el, i) => (
-            <motion.div key={i} initial={{ scale: 0, y: 10 }} animate={{ scale: 1, y: 0 }} transition={{ type: 'spring', damping: 12 }}>
-              {el}
+        {isCapturing && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-12 backdrop-blur-3xl bg-white/40"
+            onClick={() => !isProcessing && setIsCapturing(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 40 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-4xl glass p-4 rounded-[4rem] shadow-[0_80px_150px_rgba(0,0,0,0.15)] border-white/80"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <form onSubmit={handleSmartCapture} className="relative">
+                <textarea
+                  autoFocus
+                  rows={2}
+                  value={captureInput}
+                  onChange={(e) => setCaptureInput(e.target.value)}
+                  placeholder="What must be done?"
+                  className="w-full bg-transparent p-6 md:p-12 text-2xl md:text-4xl font-black tracking-tighter text-slate-900 placeholder:text-slate-200 focus:outline-none resize-none leading-none"
+                />
+
+                <div className="px-6 md:px-12 pb-8 flex flex-col gap-8">
+                  <div className="flex flex-wrap items-center gap-6">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div
+                        onClick={() => setCaptureIsPrimary(!captureIsPrimary)}
+                        className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${captureIsPrimary ? "bg-rose-600 border-rose-600 shadow-lg shadow-rose-600/20" : "border-slate-200 group-hover:border-slate-300"}`}
+                      >
+                        {captureIsPrimary && (
+                          <Check className="w-4 h-4 text-white" strokeWidth={4} />
+                        )}
+                      </div>
+                      <span className="text-sm font-black uppercase tracking-widest text-slate-600">
+                        Primary Objective
+                      </span>
+                    </label>
+
+                    {captureIsPrimary && (
+                      <motion.div
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-3"
+                      >
+                        <span className="text-[10px] font-black uppercase text-slate-400">
+                          Deadline:
+                        </span>
+                        <input
+                          type="date"
+                          value={captureDeadline}
+                          onChange={(e) => setCaptureDeadline(e.target.value)}
+                          className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
+                        />
+                      </motion.div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-6">
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                      {(["one-time", "recurring"] as TaskNature[]).map(
+                        (nature) => (
+                          <button
+                            key={nature}
+                            type="button"
+                            onClick={() => setCaptureNature(nature)}
+                            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${captureNature === nature ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-500"}`}
+                          >
+                            {nature}
+                          </button>
+                        ),
+                      )}
+                    </div>
+
+                    {captureNature === "recurring" && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="flex items-center gap-4"
+                      >
+                        <select
+                          value={captureFreq}
+                          onChange={(e) =>
+                            setCaptureFreq(e.target.value as any)
+                          }
+                          className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none"
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+
+                        {captureFreq === "weekly" && (
+                          <div className="flex gap-1">
+                            {["S", "m", "t", "w", "t", "f", "s"].map((d, i) => (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => {
+                                  setCaptureDays((prev) =>
+                                    prev.includes(i)
+                                      ? prev.filter((day) => day !== i)
+                                      : [...prev, i],
+                                  );
+                                }}
+                                className={`w-8 h-8 rounded-lg text-[10px] font-black uppercase flex items-center justify-center transition-all ${captureDays.includes(i) ? "bg-teal-500 text-white shadow-lg shadow-teal-500/20" : "bg-slate-50 text-slate-400 border border-slate-100 hover:bg-slate-100"}`}
+                              >
+                                {d}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {captureFreq === "monthly" && (
+                          <span className="text-[10px] font-black text-slate-400 uppercase italic">
+                            Select date in editing view
+                          </span>
+                        )}
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col md:flex-row items-center justify-between p-4 md:p-8 bg-slate-50/80 rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-100 mt-4 shadow-inner gap-4">
+                  <div className="flex items-center gap-4 md:gap-6 text-slate-400 w-full md:w-auto">
+                    <button
+                      type="button"
+                      onClick={handleToggleMic}
+                      className={`p-4 md:p-5 rounded-[1.25rem] md:rounded-[1.5rem] transition-all shadow-xl ${isListening ? "bg-rose-500 text-white shadow-rose-500/30 animate-pulse" : "bg-white hover:text-slate-900"}`}
+                    >
+                      <Mic className="w-6 h-6 md:w-7 md:h-7" />
+                    </button>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase tracking-widest leading-none mb-1">
+                        {isListening ? "Awaiting Audio" : "Secure Channel"}
+                      </span>
+                      <span className="text-[10px] md:text-xs font-bold text-slate-300">
+                        Voice recognition active
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 w-full md:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsCapturing(false)}
+                      className="flex-1 md:flex-none px-6 md:px-8 py-3 md:py-4 font-bold text-slate-400 hover:text-slate-600 transition-colors text-sm md:text-base"
+                    >
+                      Abort
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-[2] md:flex-none bg-slate-900 text-white px-8 md:px-12 py-4 md:py-5 rounded-[2rem] md:rounded-[2.5rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-2 md:gap-3 shadow-2xl shadow-slate-900/30"
+                    >
+                      {isProcessing ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-5 h-5" />
+                      )}
+                      <span className="whitespace-nowrap">Commit Dump</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
             </motion.div>
-          ))
-        ) : (
-          <span className="text-sm font-medium text-slate-400 pb-1">Complete tasks to grow your garden</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* TRIAGE ritual (Page 2) */}
+      <AnimatePresence>
+        {isTriageMode && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-12 glass-heavy bg-white/70 backdrop-blur-3xl"
+          >
+            <TriageQuiz
+              tasks={tasks.filter((t) => t.status === "inbox")}
+              onComplete={() => setIsTriageMode(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Focus Session Overlay */}
+      <AnimatePresence>
+        {focusTask && (
+          <TaskFocusOverlay
+            task={focusTask}
+            onClose={() => setFocusTask(null)}
+            onComplete={() => {
+              setTasks((prev) =>
+                prev.map((t) =>
+                  t.id === focusTask.id
+                    ? { ...t, completed: true, completedAt: Date.now() }
+                    : t,
+                ),
+              );
+              setFocusTask(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Missed Focus Overlay */}
+      <AnimatePresence>
+        {showMissedPopup && (
+          <MissedFocusOverlay
+            tasks={tasks.filter(
+              (t) =>
+                t.status === "focus" &&
+                !t.completed &&
+                t.focusDate &&
+                t.focusDate <
+                  new Date(
+                    new Date().getFullYear(),
+                    new Date().getMonth(),
+                    new Date().getDate(),
+                  ).getTime(),
+            )}
+            onClose={() => setShowMissedPopup(false)}
+            onComplete={(id) => {
+              setTasks((prev) =>
+                prev.map((t) =>
+                  t.id === id
+                    ? { ...t, completed: true, completedAt: Date.now() }
+                    : t,
+                ),
+              );
+            }}
+          />
         )}
       </AnimatePresence>
     </div>
   );
 }
 
-// 6. Habit Tracker Component integrating Categories
-function HabitCard({ habit, category, onLog, onEdit }: { key?: string | number, habit: Habit; category: Category | undefined; onLog: (tier: 'mini'|'plus'|'elite', sunlightReward: number, momentumBoost: number) => void; onEdit: () => void; }) {
-  const [expanded, setExpanded] = useState(false);
-  const isLoggedToday = new Date().toDateString() === new Date(habit.lastLoggedAt).toDateString();
-  
-  const heatmapDays = Array.from({length: 28}).map((_, i) => {
-     const d = new Date();
-     d.setDate(d.getDate() - (27 - i));
-     return d.toDateString();
-  });
-  
-  return (
-    <motion.div layout className={`bg-white rounded-[2rem] p-5 shadow-sm border ${isLoggedToday ? 'border-teal-100 bg-teal-50/20' : 'border-slate-100 hover:border-slate-200'} transition-all`}>
-       <div className="flex justify-between items-start mb-5">
-          <div className="flex flex-col flex-1 truncate pr-2">
-            <h3 className="font-bold text-slate-800 text-lg leading-tight truncate">{habit.name}</h3>
-            {category && (
-               <span className={`self-start mt-2 text-[10px] font-bold px-2.5 py-0.5 rounded-md uppercase tracking-wider ${category.color} bg-opacity-20`}>{category.name}</span>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-2 shrink-0">
-             <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 rounded-full border border-amber-100 shadow-sm" title="Momentum Score">
-                <Flame className={`w-4 h-4 ${habit.momentum > 0 ? 'text-amber-500' : 'text-amber-200 text-opacity-50'}`} />
-                <span className={`text-sm font-bold ${habit.momentum > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{habit.momentum}</span>
-             </div>
-             <button onClick={() => setExpanded(!expanded)} className={`p-1.5 rounded-full transition-colors flex shrink-0 ${expanded ? 'bg-indigo-100 text-indigo-600' : 'text-slate-300 hover:text-slate-600 bg-slate-50 hover:bg-slate-100'}`} title="Toggle Heatmap">
-                <Activity className="w-4 h-4"/>
-             </button>
-             <button onClick={onEdit} className="p-1.5 text-slate-300 hover:text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-full transition-colors flex shrink-0" title="Edit Habit">
-                <Settings2 className="w-4 h-4"/>
-             </button>
-          </div>
-       </div>
-
-       {isLoggedToday ? (
-         <div className="py-8 flex flex-col items-center justify-center bg-teal-50/80 rounded-2xl border border-teal-100 shadow-inner">
-            <Check className="w-10 h-10 text-teal-400 mb-2" strokeWidth={4} />
-            <span className="text-teal-700 font-bold">Momentum secured</span>
-            <span className="text-xs text-teal-600/70 font-medium">Great job adapting today.</span>
-         </div>
-       ) : (
-         <div className="flex flex-col gap-2.5">
-            <button onClick={() => onLog('mini', 10, 2)} className="text-left px-5 py-3.5 bg-white hover:bg-slate-50 border border-slate-100 hover:border-teal-200 shadow-sm rounded-2xl transition-colors group">
-               <div className="flex justify-between items-center mb-1">
-                  <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase group-hover:text-teal-500 transition-colors">Tier 1: Mini</span>
-                  <span className="text-[10px] font-bold text-amber-500/50">+2 Mo</span>
-               </div>
-               <span className="text-sm font-bold text-slate-700">{habit.tiers.mini}</span>
-            </button>
-            <button onClick={() => onLog('plus', 20, 5)} className="text-left px-5 py-3.5 bg-white hover:bg-slate-50 border border-slate-100 hover:border-teal-200 shadow-sm rounded-2xl transition-colors group">
-               <div className="flex justify-between items-center mb-1">
-                  <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase group-hover:text-teal-500 transition-colors">Tier 2: Plus</span>
-                  <span className="text-[10px] font-bold text-amber-500/50">+5 Mo</span>
-               </div>
-               <span className="text-sm font-bold text-slate-700">{habit.tiers.plus}</span>
-            </button>
-            <button onClick={() => onLog('elite', 40, 10)} className="text-left px-5 py-3.5 bg-white hover:bg-slate-50 border border-slate-100 hover:border-teal-200 shadow-sm rounded-2xl transition-colors group">
-               <div className="flex justify-between items-center mb-1">
-                  <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase group-hover:text-teal-500 transition-colors">Tier 3: Elite</span>
-                  <span className="text-[10px] font-bold text-amber-500/50">+10 Mo</span>
-               </div>
-               <span className="text-sm font-bold text-slate-700">{habit.tiers.elite}</span>
-            </button>
-         </div>
-       )}
-
-       <AnimatePresence>
-         {expanded && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden mt-5 pt-4 border-t border-slate-100">
-               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">28-Day Consistency</span>
-               <div className="grid grid-cols-7 gap-1.5 h-max">
-                 {heatmapDays.map((dateStr, idx) => {
-                    const didLog = habit.history && habit.history.includes(dateStr);
-                    return (
-                       <div 
-                         key={idx} 
-                         title={dateStr}
-                         className={`aspect-square rounded-md ${didLog ? 'bg-teal-500 shadow-sm border border-teal-600/20' : 'bg-slate-100 border border-slate-200/50'}`}
-                       />
-                    )
-                 })}
-               </div>
-            </motion.div>
-         )}
-       </AnimatePresence>
-    </motion.div>
-  )
-}
-
-// --- Main Application ---
-export default function App() {
-  const [tasks, setTasks] = useLocalStorage<Task[]>('ff_v2_tasks', []);
-  const [sunlight, setSunlight] = useLocalStorage<number>('ff_v2_sunlight', 0);
-  
-  const [categories, setCategories] = useLocalStorage<Category[]>('ff_v2_categories', [
-    { id: 'cat-health', name: 'Health', color: TAILWIND_COLORS[0] },
-    { id: 'cat-mind', name: 'Mindfulness', color: TAILWIND_COLORS[1] }
-  ]);
-  
-  const [habits, setHabits] = useLocalStorage<Habit[]>('ff_v2_habits', [
-    { id: 'h1', name: 'Hydration Base', categoryId: 'cat-health', tiers: { mini: 'Drink 1 glass of water', plus: 'Drink 3 glasses', elite: 'Drink 2 liters' }, momentum: 12, lastLoggedAt: 0 },
-    { id: 'h2', name: 'Breathing Routine', categoryId: 'cat-mind', tiers: { mini: '3 deep breaths', plus: '5 minute meditation', elite: '20 minute meditation session' }, momentum: 5, lastLoggedAt: 0 }
-  ]);
-  
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
-
-  const [captureInput, setCaptureInput] = useState('');
-  const [hyperfocusTask, setHyperfocusTask] = useState<Task | null>(null);
-  const [emergencyMode, setEmergencyMode] = useState(false);
-  const [editingHabit, setEditingHabit] = useState<Habit | null | 'new'>(null);
-
-  // Voice & Parsing States
-  const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [isSmartCompiling, setIsSmartCompiling] = useState(false);
-  const recognitionRef = useRef<any>(null);
-
-  // Calendar Integration States
-  const [calendarToken, setCalendarToken] = useLocalStorage<{ access_token: string, expiry: number } | null>('ff_v2_calendar_token', null);
-  const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
-  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
-  const [activeAlarm, setActiveAlarm] = useState<any | null>(null);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) return;
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        const tokens = event.data.tokens;
-        if (tokens.access_token) {
-           setCalendarToken({ access_token: tokens.access_token, expiry: Date.now() + tokens.expires_in * 1000 });
-        }
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [setCalendarToken]);
-
-  useEffect(() => {
-    if (calendarToken && calendarToken.expiry > Date.now()) {
-       fetchCalendarEvents();
-    } else if (calendarToken && calendarToken.expiry <= Date.now()) {
-       setCalendarToken(null);
-    }
-  }, [calendarToken]);
-
-  const fetchCalendarEvents = async () => {
-    if (!calendarToken) return;
-    setIsLoadingCalendar(true);
-    try {
-      const start = new Date();
-      start.setHours(0,0,0,0);
-      const end = new Date();
-      end.setHours(23,59,59,999);
-      
-      const res = await fetch(`/api/calendar/events?timeMin=${encodeURIComponent(start.toISOString())}&timeMax=${encodeURIComponent(end.toISOString())}`, {
-        headers: { 'Authorization': `Bearer ${calendarToken.access_token}` }
-      });
-      if (res.status === 401) {
-         setCalendarToken(null);
-         throw new Error("Token expired");
-      }
-      
-      const text = await res.text();
-      let data;
-      try {
-         data = JSON.parse(text);
-      } catch (e) {
-         console.error("Invalid JSON from calendar fetch:", text);
-         return;
-      }
-
-      if (!res.ok) {
-         console.error("Calendar API Error:", data);
-         alert(`Calendar Sync Error: ${data.message || data.error?.message || data.error || "Verify Google Calendar API is enabled in GCP."}`);
-         return;
-      }
-      setCalendarEvents(data.items || []);
-    } catch (err) {
-      console.error("Calendar fetch error:", err);
-      if (err instanceof TypeError && err.message.includes('fetch')) {
-         alert("Network Error: Failed to fetch calendar (Adblocker or offline). Proxy should prevent this.");
-      }
-    } finally {
-      setIsLoadingCalendar(false);
-    }
-  };
-
-  const handleConnectCalendar = async () => {
-    try {
-      console.log("Fetching /api/auth/url");
-      const res = await fetch('/api/auth/url');
-      console.log("Response status:", res.status);
-      
-      const text = await res.text();
-      console.log("Response text:", text);
-      
-      let data;
-      try {
-         data = JSON.parse(text);
-      } catch (e) {
-         console.error("Failed to parse JSON from /api/auth/url", text);
-         alert("Invalid response from server");
-         return;
-      }
-      
-      if (!res.ok) {
-         alert(data.message || "Failed to set up Google Calendar sync.");
-         return;
-      }
-      
-      window.open(data.url, 'oauth_popup', 'width=600,height=700');
-    } catch (err) {
-      console.error("handleConnectCalendar fetch error:", err);
-      alert(`Network error connecting to backend: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  const addEventAsTask = (event: any) => {
-    const newTask: Task = { 
-      id: crypto.randomUUID(), 
-      text: event.summary || "Calendar Event", 
-      completed: false, 
-      createdAt: Date.now(), 
-      status: 'today', 
-      priority: 'high',
-      subtasks: [],
-      dependencies: []
-    };
-    setTasks(prev => [newTask, ...prev]);
-  };
-
-  // Alarm Poller
-  useEffect(() => {
-    if (calendarEvents.length === 0) return;
-    
-    // Request permission if not granted
-    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
-      Notification.requestPermission();
-    }
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      calendarEvents.forEach(event => {
-        if (event.start?.dateTime) {
-           const eventTime = new Date(event.start.dateTime);
-           const diffMs = eventTime.getTime() - now.getTime();
-           // Notify 5 minutes before
-           if (diffMs > 0 && diffMs <= 5 * 60 * 1000) {
-             const key = `notified_${event.id}`;
-             if (!localStorage.getItem(key)) {
-                localStorage.setItem(key, 'true');
-                setActiveAlarm(event); // Trigger loud, visual app alert
-                
-                if (Notification.permission === "granted") {
-                  new Notification("Upcoming Event", {
-                     body: `${event.summary} starts in 5 minutes!`,
-                     icon: '/pwa-192x192.png'
-                  });
-                }
-             }
-           }
-        }
-      });
-    }, 60000); // check every minute
-    return () => clearInterval(interval);
-  }, [calendarEvents]);
-
-  useEffect(() => {
-    const purgeThreshold = BANKRUPTCY_HR * 60 * 60 * 1000;
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setTasks(prev => prev.filter(t => t.completed || t.recurring || (now - t.createdAt) < purgeThreshold));
-    }, 60 * 1000); 
-    return () => clearInterval(interval);
-  }, [setTasks]);
-
-  useEffect(() => {
-    const todayStr = new Date().toDateString();
-    let updated = false;
-    const newHabits = habits.map(h => {
-      if (h.lastLoggedAt === 0) return h; 
-      const daysSince = Math.floor((Date.now() - h.lastLoggedAt) / (1000 * 60 * 60 * 24));
-      if (daysSince > 1 && new Date(h.lastLoggedAt).toDateString() !== todayStr) {
-        const decay = (daysSince - 1) * 2;
-        const newMomentum = Math.max(0, h.momentum - decay);
-        if (newMomentum !== h.momentum) {
-          updated = true;
-          return { ...h, momentum: newMomentum };
-        }
-      }
-      return h;
-    });
-    if (updated) setHabits(newHabits);
-  }, []);
-
-  useEffect(() => {
-    setTasks(prev => {
-      const activeTodayLength = prev.filter(t => !t.completed && t.status === 'today' && (!t.showAfter || t.showAfter <= Date.now())).length;
-      if (activeTodayLength >= 5) return prev;
-      
-      const activeBacklog = prev.filter(t => !t.completed && t.status === 'backlog' && (!t.showAfter || t.showAfter <= Date.now()));
-      if (activeBacklog.length === 0) return prev;
-
-      const needed = 5 - activeTodayLength;
-      
-      const pL = (p: Task['priority']) => p === 'high' ? 3 : p === 'medium' ? 2 : p === 'low' ? 1 : 0;
-      const sortedBacklog = [...activeBacklog].sort((a,b) => {
-        const pDiff = pL(b.priority) - pL(a.priority);
-        return pDiff !== 0 ? pDiff : b.createdAt - a.createdAt;
-      });
-
-      const toPromoteIds = sortedBacklog.slice(0, needed).map(t => t.id);
-      
-      let changed = false;
-      const next = prev.map(t => {
-         if (toPromoteIds.includes(t.id)) {
-            changed = true;
-            return { ...t, status: 'today' };
-         }
-         return t;
-      });
-      return changed ? next : prev;
-    });
-  }, [tasks]);
-
-  const handleSmartCapture = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!captureInput.trim()) return;
-    
-    setIsSmartCompiling(true);
-    let todayCount = tasks.filter(t => !t.completed && t.status === 'today').length;
-    
-    // Parse input string: Attempt newlines first, then commas
-    let rawTasks: string[] = [];
-    if (captureInput.includes('\n')) {
-       rawTasks = captureInput.split(/\r?\n/);
-    } else if (captureInput.includes(',')) {
-       rawTasks = captureInput.split(',');
-    } else {
-       rawTasks = [captureInput];
-    }
-    
-    rawTasks = rawTasks.map(t => t.trim().replace(/^[-*•]\s*/, '')).filter(t => t.length > 0);
-
-    const newTasks: Task[] = rawTasks.map(text => {
-       let assignedStatus: 'today' | 'backlog' = 'today';
-       if (todayCount >= 5) assignedStatus = 'backlog';
-       else todayCount++;
-       
-       return {
-         id: crypto.randomUUID(),
-         text: text.charAt(0).toUpperCase() + text.slice(1),
-         completed: false,
-         createdAt: Date.now(),
-         status: assignedStatus,
-         priority: 'medium',
-         estimatedTime: null,
-         subtasks: [],
-         dependencies: []
-       };
-    });
-    
-    setTimeout(() => {
-      setTasks(prev => [...newTasks, ...prev]);
-      setCaptureInput('');
-      setIsSmartCompiling(false);
-    }, 500); // Visual delay
-  };
-
-  const handleToggleMic = async () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Speech recognition is not supported in this browser. Try Chrome or Edge.");
-      return;
-    }
-    
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      setIsListening(false);
-      return;
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-      
-      recognitionRef.current = recognition;
-
-      recognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setCaptureInput(prev => (prev ? prev + ' ' + transcript : transcript).trim());
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognition.start();
-    } catch (err) {
-      console.error(err);
-      setIsListening(false);
-    }
-  };
-
-  const completeTask = (id: string, extraReward: number = 0) => {
-    let reward = extraReward;
-    if (reward === 0) reward = Math.floor(15 * (Math.random() < 0.15 ? 4 : (0.8 + Math.random() * 0.4)));
-    setSunlight(prev => prev + reward);
-    
-    setTasks(prev => {
-      const task = prev.find(t => t.id === id);
-      let nextTasks = [...prev];
-      if (task && task.recurring) {
-        const now = new Date();
-        const next = new Date(now);
-        next.setHours(0,0,0,0);
-        
-        if (task.recurring.frequency === 'daily') {
-          next.setDate(next.getDate() + 1);
-        } else if (task.recurring.frequency === 'weekly') {
-          const targetDay = task.recurring.dayOfWeek || 0;
-          let diff = targetDay - now.getDay();
-          if (diff <= 0) diff += 7;
-          next.setDate(next.getDate() + diff);
-        } else if (task.recurring.frequency === 'monthly') {
-          const targetDate = task.recurring.dateOfMonth || 1;
-          let currentMonth = now.getMonth();
-          let currentYear = now.getFullYear();
-          if (now.getDate() >= targetDate) {
-              currentMonth++;
-              if (currentMonth > 11) {
-                  currentMonth = 0;
-                  currentYear++;
-              }
-          }
-          next.setFullYear(currentYear, currentMonth, targetDate);
-        }
-        
-        // Spawn next instance
-        nextTasks.push({
-          ...task,
-          id: crypto.randomUUID(),
-          completed: false,
-          createdAt: Date.now(),
-          showAfter: next.getTime(),
-          subtasks: task.subtasks ? task.subtasks.map(st => ({...st, completed: false})) : []
-        });
-      }
-      return nextTasks.map(t => t.id === id ? { ...t, completed: true } : t);
-    });
-    
-    setTimeout(() => { setTasks(prev => prev.filter(t => t.id !== id)); }, 2000);
-  };
-
-  const handleLogHabit = (id: string, reward: number, boost: number) => {
-    const todayStr = new Date().toDateString();
-    setHabits(prev => prev.map(h => {
-      if (h.id === id) {
-         const history = h.history ? [...h.history] : [];
-         if (!history.includes(todayStr)) history.push(todayStr);
-         return { ...h, momentum: h.momentum + boost, lastLoggedAt: Date.now(), history };
-      }
-      return h;
-    }));
-    const multiplier = Math.random() < 0.20 ? 3 : 1;
-    setSunlight(prev => prev + (reward * multiplier));
-  };
-
-  const createCategory = (name: string, color: string): Category => {
-     const newCat = { id: crypto.randomUUID(), name, color };
-     setCategories(prev => [...prev, newCat]);
-     return newCat;
-  }
-
-  const handleSaveHabit = (habitData: { name: string; categoryId: string | null; tiers: { mini: string; plus: string; elite: string } }) => {
-    if (editingHabit === 'new') {
-      const newHabit: Habit = { id: crypto.randomUUID(), name: habitData.name, categoryId: habitData.categoryId, tiers: habitData.tiers, momentum: 0, lastLoggedAt: 0, history: [] };
-      setHabits(prev => [...prev, newHabit]);
-    } else if (editingHabit) {
-      setHabits(prev => prev.map(h => h.id === editingHabit.id ? { ...h, name: habitData.name, categoryId: habitData.categoryId, tiers: habitData.tiers } : h));
-    }
-    setEditingHabit(null);
-  };
-
-  const handleDeleteHabit = () => {
-    if (editingHabit && editingHabit !== 'new') {
-      setHabits(prev => prev.filter(h => h.id !== editingHabit.id));
-      setEditingHabit(null);
-    }
-  };
-
-  const [isSpinning, setIsSpinning] = useState(false);
-  const pickForMe = () => {
-    if (activeToday.length === 0) return;
-    setIsSpinning(true);
-    setTimeout(() => {
-      const randomTask = activeToday[Math.floor(Math.random() * activeToday.length)];
-      setHyperfocusTask(randomTask);
-      setIsSpinning(false);
-    }, 600);
-  };
-
-  const handleLogDistraction = (text: string) => {
-    const newTask: Task = { id: crypto.randomUUID(), text: text.charAt(0).toUpperCase() + text.slice(1), completed: false, createdAt: Date.now(), status: 'backlog', priority: 'low', subtasks: [], dependencies: [] };
-    setTasks(prev => [newTask, ...prev]);
-  };
-
-  const pLevel = (p: Task['priority']) => p === 'high' ? 3 : p === 'medium' ? 2 : p === 'low' ? 1 : 0;
-
-  const activeToday = tasks.filter(t => !t.completed && t.status === 'today' && (!t.showAfter || t.showAfter <= Date.now())).sort((a,b) => {
-    const pDiff = pLevel(b.priority) - pLevel(a.priority);
-    return pDiff !== 0 ? pDiff : b.createdAt - a.createdAt;
-  });
-  
-  const activeBacklog = tasks.filter(t => !t.completed && t.status === 'backlog' && (!t.showAfter || t.showAfter <= Date.now())).sort((a,b) => {
-    const pDiff = pLevel(b.priority) - pLevel(a.priority);
-    return pDiff !== 0 ? pDiff : b.createdAt - a.createdAt;
-  });
-
-  const displayedHabits = selectedCategoryFilter 
-     ? habits.filter(h => h.categoryId === selectedCategoryFilter) 
-     : habits;
+function MissedFocusOverlay({
+  tasks,
+  onClose,
+  onComplete,
+}: {
+  tasks: Task[];
+  onClose: () => void;
+  onComplete: (id: string) => void;
+}) {
+  if (tasks.length === 0) return null;
 
   return (
-    <div className="min-h-screen pb-24 w-full overflow-x-hidden selection:bg-teal-200">
-      
-      <AnimatePresence>
-        {hyperfocusTask && (
-          <HyperfocusOverlay task={hyperfocusTask} onClose={() => setHyperfocusTask(null)} onComplete={(reward) => { completeTask(hyperfocusTask.id, reward); setHyperfocusTask(null); }} onLogDistraction={handleLogDistraction} />
-        )}
-        {emergencyMode && (
-          <EmergencyMode onClose={() => setEmergencyMode(false)} />
-        )}
-        {editingHabit && (
-          <HabitFormOverlay 
-             initialHabit={editingHabit} 
-             onSave={handleSaveHabit} 
-             onClose={() => setEditingHabit(null)} 
-             onDelete={handleDeleteHabit} 
-             categories={categories}
-             createCategory={createCategory}
-          />
-        )}
-        {activeAlarm && (
-          <motion.div initial={{ opacity: 0, y: -50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -50 }} className="fixed top-8 left-1/2 -translate-x-1/2 z-[300] w-full max-w-sm">
-             <div className="bg-indigo-600 text-white p-6 rounded-3xl shadow-2xl flex flex-col items-center text-center gap-4 border-4 border-indigo-500 shadow-indigo-600/30">
-                <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center animate-pulse">
-                   <Bell className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                   <h3 className="text-xl font-bold mb-1">Starting in 5 Minutes</h3>
-                   <p className="text-indigo-100 font-medium line-clamp-2">{activeAlarm.summary}</p>
-                </div>
-                <button onClick={() => setActiveAlarm(null)} className="mt-2 text-indigo-600 bg-white hover:bg-indigo-50 px-6 py-2.5 rounded-xl font-bold transition-colors w-full">
-                  Got it
-                </button>
-             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="fixed inset-0 z-[300] bg-rose-600 flex items-center justify-center p-6 md:p-12 overflow-y-auto"
+    >
+      <div className="max-w-2xl w-full">
+        <div className="flex justify-between items-start mb-12 text-left">
+          <div>
+            <h2 className="text-5xl md:text-7xl font-black text-white italic tracking-tighter leading-none mb-4">
+              MISSED FOCUS
+            </h2>
+            <p className="text-rose-200 font-bold uppercase tracking-widest text-sm">
+              Yesterday's objectives remain unfinished
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-4 bg-white/10 text-white rounded-full hover:bg-white/20 transition-all"
+          >
+            <Minimize2 className="w-8 h-8" />
+          </button>
+        </div>
 
-      <div className="max-w-4xl mx-auto px-4 md:px-8 pt-8">
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 bg-white p-4 rounded-3xl shadow-sm border border-slate-100 gap-4">
-           <div className="flex flex-col">
-             <div className="flex items-center gap-3 mb-2">
-               <div className="w-10 h-10 bg-teal-50 rounded-[1.25rem] flex items-center justify-center text-teal-600">
-                 <Sun className="w-6 h-6" />
-               </div>
-               <div>
-                  <h1 className="text-xl font-bold text-slate-800">FocusFlow AI</h1>
-               </div>
-             </div>
-             <div className="flex items-center">
-                <VisualGarden sunlight={sunlight} />
-             </div>
-           </div>
-           
-           <div className="flex items-center gap-4">
-              <div className="flex flex-col items-end mr-2">
-                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Sunlight Gathered</span>
-                 <div className="flex items-center gap-2">
-                   <Sun className="w-4 h-4 text-amber-500" />
-                   <span className="font-bold text-amber-600 text-xl">{sunlight}</span>
-                 </div>
-              </div>
-              <div className="w-px h-10 bg-slate-100"></div>
-              <button onClick={() => setEmergencyMode(true)} className="w-12 h-12 bg-slate-50 rounded-[1.25rem] border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-red-500 transition-colors shadow-sm" title="Bad Brain Day Rescue">
-                <LifeBuoy className="w-6 h-6" />
+        <div className="flex flex-col gap-4 mb-20 text-left">
+          {tasks.map((task) => (
+            <div
+              key={task.id}
+              className="bg-white p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-6"
+            >
+              <span className="text-xl md:text-2xl font-black text-slate-900 line-clamp-2">
+                {task.text}
+              </span>
+              <button
+                onClick={() => onComplete(task.id)}
+                className="w-full md:w-auto px-6 md:px-8 py-3 md:py-4 bg-rose-600 text-white rounded-xl md:rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl shadow-rose-600/20 shrink-0"
+              >
+                Complete Now
               </button>
-           </div>
-        </header>
-
-        <section className="mb-12">
-           <div className="flex items-center gap-2 mb-3 ml-2">
-              <Zap className="w-4 h-4 text-slate-400" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Quick Task Capture</span>
-           </div>
-           <form onSubmit={handleSmartCapture} className={`relative shadow-sm rounded-[2rem] bg-white border p-2 overflow-hidden transition-all ${isListening ? 'ring-4 ring-rose-500/20 border-rose-200' : 'focus-within:ring-4 ring-teal-500/20 border-slate-100'}`}>
-             <input type="text" disabled={isTranscribing || isSmartCompiling} placeholder={isTranscribing ? "Transcribing speech..." : isSmartCompiling ? "Analyzing tasks..." : "List your thoughts... (separate with new lines or commas)"} value={captureInput} onChange={(e) => setCaptureInput(e.target.value)} className="w-full bg-transparent p-6 pr-20 text-xl font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:opacity-50" />
-             <button type="button" onClick={handleToggleMic} disabled={isTranscribing || isSmartCompiling} className={`absolute right-4 top-1/2 -translate-y-1/2 w-14 h-14 rounded-[1.25rem] flex items-center justify-center transition-colors shadow-md ${isListening ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/30 animate-pulse' : 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20 disabled:opacity-50'}`} title="Voice Dictation">
-                {isTranscribing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Mic className="w-6 h-6" />}
-             </button>
-           </form>
-           {captureInput.length > 0 && !isListening && !isTranscribing && (
-              <motion.button disabled={isSmartCompiling} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} onClick={(e: any) => handleSmartCapture(e)} className="mt-4 px-6 py-3.5 bg-slate-800 text-white rounded-xl shadow-md font-bold text-sm hover:bg-slate-700 border border-slate-700 w-full flex justify-center items-center gap-2 transition-colors disabled:opacity-75">
-                {isSmartCompiling ? <><Loader2 className="w-4 h-4 animate-spin"/> Parsing Tasks...</> : "Parse into Tasks"}
-              </motion.button>
-           )}
-        </section>
-
-        {/* Google Calendar Sync */}
-        <section className="mb-12">
-           <div className="flex items-center justify-between pl-2 mb-4">
-               <div>
-                 <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                   <CalendarIcon className="w-5 h-5 text-indigo-600"/> Auto-Scheduler & Calendar
-                 </h2>
-                 <p className="text-sm font-medium text-slate-400 mt-1">Sync Google Calendar to get automatic alarms & focus tasks.</p>
-               </div>
-               {!calendarToken ? (
-                 <button onClick={handleConnectCalendar} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 font-bold text-sm rounded-xl hover:bg-indigo-100 transition-colors">
-                    Connect Google Calendar
-                 </button>
-               ) : (
-                 <div className="flex gap-2">
-                    <button onClick={fetchCalendarEvents} disabled={isLoadingCalendar} className="p-2 text-slate-400 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg hover:border-indigo-200 transition-colors" title="Refresh Calendar">
-                       <RefreshCw className={`w-4 h-4 ${isLoadingCalendar ? 'animate-spin' : ''}`} />
-                    </button>
-                    <button onClick={() => setCalendarToken(null)} className="px-3 py-2 text-slate-500 hover:text-red-600 text-sm font-semibold hover:bg-red-50 rounded-lg transition-colors">
-                       Disconnect
-                    </button>
-                 </div>
-               )}
-           </div>
-           
-           {calendarToken && (
-             <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
-                {calendarEvents.length === 0 ? (
-                  <div className="text-sm font-medium text-slate-400 py-4 px-2">No upcoming events today.</div>
-                ) : (
-                  calendarEvents.map((event, idx) => {
-                     const isPast = event.start?.dateTime && new Date(event.start.dateTime) < new Date();
-                     return (
-                      <div key={idx} className={`flex-shrink-0 w-64 p-4 rounded-2xl border ${isPast ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-white border-indigo-100 shadow-sm'} flex flex-col gap-3 group`}>
-                         <div className="flex justify-between items-start">
-                            <span className="text-xs font-bold uppercase tracking-wider text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md">
-                              {event.start?.dateTime ? new Date(event.start.dateTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'All Day'}
-                            </span>
-                            {!isPast && (
-                               <Bell className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors" />
-                            )}
-                         </div>
-                         <span className="font-bold text-slate-800 line-clamp-2">{event.summary || "Busy"}</span>
-                         {!isPast && (
-                           <button onClick={() => addEventAsTask(event)} className="mt-auto pt-2 text-sm font-semibold text-teal-600 hover:text-teal-700 flex items-center gap-1">
-                              <Plus className="w-4 h-4" /> Add as Focus Task
-                           </button>
-                         )}
-                      </div>
-                     );
-                  })
-                )}
-             </div>
-           )}
-        </section>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 mb-12">
-           <section className="lg:col-span-12 flex flex-col gap-6">
-              <div className="flex items-center justify-between pl-2">
-                 <div className="flex items-baseline gap-4">
-                   <h2 className="text-xl font-bold text-slate-800">Today's Focus</h2>
-                   <span className="text-sm font-semibold text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
-                     {activeToday.length} / 5 Max
-                   </span>
-                 </div>
-                 
-                 {activeToday.length > 1 && (
-                   <button onClick={pickForMe} disabled={isSpinning} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 font-bold text-sm rounded-xl hover:bg-indigo-100 transition-colors disabled:opacity-50">
-                     <Dices className={`w-4 h-4 ${isSpinning ? 'animate-spin' : ''}`}/> Pick For Me
-                   </button>
-                 )}
-              </div>
-              
-              {activeToday.length === 0 && (
-                <div className="p-10 border-2 border-dashed border-slate-200 rounded-[2rem] text-center flex flex-col items-center justify-center gap-4 text-slate-400 bg-white/50">
-                   <Target className="w-10 h-10 opacity-50" />
-                   <p className="font-medium text-lg">Your focus board is perfectly clear.</p>
-                </div>
-              )}
-
-              <AnimatePresence>
-                {activeToday.map(task => (
-                  <TaskCard
-                    key={task.id} task={task} availableTasks={tasks} onComplete={() => completeTask(task.id)} onDelete={() => setTasks(prev => prev.filter(t => t.id !== task.id))}
-                    onStatusChange={(status) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, status} : t))}
-                    onEnterHyperfocus={() => setHyperfocusTask(task)} onAddSubtask={(str) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: [...(t.subtasks||[]), {id: crypto.randomUUID(), text: str, completed: false}]} : t))}
-                    onToggleSubtask={(subId) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, subtasks: t.subtasks?.map(s => s.id === subId ? {...s, completed: !s.completed} : s)} : t))}
-                    onSetEffort={(eff) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, estimatedTime: eff} : t))}
-                    onSetPriority={(p) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, priority: p} : t))}
-                    onUpdateDependencies={(deps) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, dependencies: deps} : t))}
-                    onUpdateRecurring={(rec) => setTasks(prev => prev.map(t => t.id === task.id ? {...t, recurring: rec} : t))}
-                  />
-                ))}
-              </AnimatePresence>
-           </section>
+            </div>
+          ))}
         </div>
 
-        {/* Phase 2: Elastic Habit Tracking with Categories */}
-        <section className="mb-16">
-           <div className="flex flex-col sm:flex-row sm:items-end justify-between pl-2 mb-4 border-b border-slate-100 pb-4 gap-4">
-               <div>
-                 <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                   <Activity className="w-5 h-5 text-teal-600"/> Momentum Habits
-                 </h2>
-                 <p className="text-sm font-medium text-slate-400 mt-1">100% success at any tier. No broken streaks.</p>
-               </div>
-               <button onClick={() => setEditingHabit('new')} className="flex items-center gap-2 px-4 py-2.5 bg-white text-slate-600 font-bold text-sm rounded-xl border border-slate-200 hover:border-teal-300 hover:text-teal-600 shadow-sm transition-all shrink-0">
-                  <Plus className="w-4 h-4"/> Add Habit
-               </button>
-           </div>
-
-           {/* Category Filters */}
-           <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-2">
-             <button 
-                onClick={() => setSelectedCategoryFilter(null)}
-                className={`px-4 py-2 rounded-xl font-bold text-sm border whitespace-nowrap transition-colors ${selectedCategoryFilter === null ? 'bg-slate-800 text-white border-slate-800 shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-50 border-slate-200'}`}
-             >
-               All Habits
-             </button>
-             {categories.map(cat => (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategoryFilter(cat.id)}
-                  className={`px-4 py-2 rounded-xl font-bold text-sm border whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-slate-800 text-white border-slate-800 shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-50 border-slate-200'}`}
-                >
-                  {cat.name}
-                </button>
-             ))}
-           </div>
-           
-           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-2">
-              <AnimatePresence>
-                {displayedHabits.map(habit => (
-                  <HabitCard 
-                     key={habit.id} 
-                     habit={habit} 
-                     category={categories.find(c => c.id === habit.categoryId)}
-                     onLog={(tier, reward, boost) => handleLogHabit(habit.id, reward, boost)} 
-                     onEdit={() => setEditingHabit(habit)} 
-                  />
-                ))}
-              </AnimatePresence>
-              {displayedHabits.length === 0 && (
-                <div className="col-span-full py-8 text-center text-slate-400 font-medium">No habits found in this category.</div>
-              )}
-           </div>
-        </section>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-           <section className="lg:col-span-12 flex flex-col gap-6 mt-6">
-              <div className="flex items-baseline justify-between pl-2">
-                 <h2 className="text-xl font-bold text-slate-800">The Archive</h2>
-                 <span className="text-sm font-semibold text-slate-400">
-                   Auto-purges older items
-                 </span>
-              </div>
-
-              <div className="bg-slate-100 rounded-[2rem] p-6 flex flex-col gap-4 border border-slate-200 shadow-inner">
-                {activeBacklog.length === 0 && (
-                  <p className="text-center font-medium text-slate-400 py-8">No overflowing thoughts.</p>
-                )}
-                
-                <AnimatePresence>
-                  {activeBacklog.map(task => (
-                    <motion.div key={task.id} layout initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className={`bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-start gap-4 group transition-all ${task.dependencies?.some(dId => tasks.find(t => t.id === dId && !t.completed)) ? 'opacity-70 grayscale-[0.2]' : 'hover:border-slate-300'}`}>
-                      <button disabled={task.dependencies?.some(dId => tasks.find(t => t.id === dId && !t.completed))} onClick={() => completeTask(task.id)} className={`mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 ${task.dependencies?.some(dId => tasks.find(t => t.id === dId && !t.completed)) ? 'border-slate-200 bg-slate-50 cursor-not-allowed' : 'border-slate-200 hover:border-amber-500 hover:bg-amber-50'}`}>
-                         {task.completed ? <Check className="w-3 h-3 text-amber-600" strokeWidth={3} /> : (task.dependencies?.some(dId => tasks.find(t => t.id === dId && !t.completed)) ? <div className="w-1.5 h-1.5 rounded-full bg-slate-300"></div> : null)}
-                      </button>
-                      <div className="flex-1 flex flex-col pt-0.5">
-                         <span className="text-base font-semibold text-slate-600 leading-snug">{task.text}</span>
-                         <div className="flex gap-2">
-                           {task.priority && (
-                             <span className={`text-[10px] w-max font-bold tracking-wider uppercase px-2 py-0.5 rounded border ${task.priority === 'high' ? 'text-rose-600 bg-rose-50 border-rose-200' : task.priority === 'medium' ? 'text-amber-600 bg-amber-50 border-amber-200' : 'text-slate-600 bg-slate-100 border-slate-200'} shrink-0 mt-1`}>
-                               {task.priority} Priority
-                             </span>
-                           )}
-                           {task.dependencies && task.dependencies.some(dId => tasks.find(t => t.id === dId && !t.completed)) && (
-                             <span className="text-[10px] w-max font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-slate-200 bg-slate-100 text-slate-500 shrink-0 mt-1">
-                               Blocked
-                             </span>
-                           )}
-                           {task.recurring && (
-                             <span className="text-[10px] flex items-center gap-1 w-max font-bold tracking-wider uppercase px-2 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-600 shrink-0 mt-1">
-                               <RefreshCw className="w-3 h-3" /> Repeating
-                             </span>
-                           )}
-                         </div>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button disabled={task.dependencies?.some(dId => tasks.find(t => t.id === dId && !t.completed))} onClick={() => { if (activeToday.length < 5) setTasks(prev => prev.map(t => t.id === task.id ? {...t, status: 'today'} : t)); else alert("Clear some focus tasks first to prevent overwhelm."); }} className={`p-1.5 rounded-lg transition-colors ${task.dependencies?.some(dId => tasks.find(t => t.id === dId && !t.completed)) ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:text-teal-600 bg-slate-50 hover:bg-teal-50'}`}>
-                          <ArrowUp className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => setTasks(prev => prev.filter(t => t.id !== task.id))} className="p-1.5 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-lg">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-           </section>
-        </div>
+        <p className="text-center text-rose-300 font-bold text-[10px] uppercase tracking-[0.4em]">
+          Persistence is non-optional
+        </p>
       </div>
-    </div>
+    </motion.div>
   );
 }
