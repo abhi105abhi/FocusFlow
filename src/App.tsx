@@ -1018,7 +1018,33 @@ export default function App() {
   const [focusTask, setFocusTask] = useState<Task | null>(null);
   const [showMissedPopup, setShowMissedPopup] = useState(false);
 
-  // --- FOCUSFLOW ENGINE: State Transitions ---
+  // --- PWA Deep Link & Share Target Routing ---
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get("action");
+    const title = params.get("title");
+    const text = params.get("text");
+    const url = params.get("url");
+
+    if (action === "focus") {
+      setActiveView("focus");
+    } else if (action === "dump" || action === "share") {
+      setActiveView("dump");
+      setIsCapturing(true);
+      
+      const captureText = [title, text, url].filter(Boolean).join(" - ");
+      if (captureText) {
+        setCaptureInput(captureText);
+      }
+    }
+    
+    // Clean up URL so refresh doesn't trigger it again
+    if (action) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // --- FOCUSFLOW ENGINE: State Transitions & App Badging ---
   useEffect(() => {
     const now = new Date();
     const todayStart = new Date(
@@ -1026,6 +1052,26 @@ export default function App() {
       now.getMonth(),
       now.getDate(),
     ).getTime();
+
+    // 1. Calculate and update the native PWA OS Badge for overdue tasks
+    try {
+      if ('setAppBadge' in navigator) {
+        const overduePrimary = tasks.filter(t => 
+          !t.completed && 
+          t.status === 'primary' && 
+          t.deadline && 
+          t.deadline < todayStart
+        ).length;
+        
+        if (overduePrimary > 0) {
+          (navigator as any).setAppBadge(overduePrimary);
+        } else {
+          (navigator as any).clearAppBadge();
+        }
+      }
+    } catch (e) {
+      // Ignore badging errors quietly (some browsers restrict this)
+    }
 
     setTasks((prev) => {
       let changed = false;

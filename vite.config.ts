@@ -22,8 +22,45 @@ export default defineConfig({
         theme_color: '#F5F7F6',
         background_color: '#F5F7F6',
         display: 'standalone',
+        display_override: ['window-controls-overlay', 'standalone'],
         start_url: '/',
         orientation: 'portrait',
+        protocol_handlers: [
+          {
+            protocol: 'web+focus',
+            url: '/?action=focus'
+          },
+          {
+            protocol: 'web+dump',
+            url: '/?action=dump'
+          }
+        ],
+        share_target: {
+          action: '/?action=share',
+          method: 'GET',
+          enctype: 'application/x-www-form-urlencoded',
+          params: {
+            title: 'title',
+            text: 'text',
+            url: 'url'
+          }
+        },
+        shortcuts: [
+          {
+            name: "Focus Mode",
+            short_name: "Focus",
+            description: "Go to focus mode",
+            url: "/?action=focus",
+            icons: [{ src: "/icon.svg", sizes: "192x192" }]
+          },
+          {
+            name: "Capture Task",
+            short_name: "Capture",
+            description: "Quickly dump a thought",
+            url: "/?action=dump",
+            icons: [{ src: "/icon.svg", sizes: "192x192" }]
+          }
+        ],
         icons: [
           {
             src: '/icon.svg',
