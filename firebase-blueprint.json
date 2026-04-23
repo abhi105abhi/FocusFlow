@@ -1,0 +1,32 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "A task created by a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner ID matching Auth UID" },
+        "text": { "type": "string" },
+        "note": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "completedAt": { "type": "number" },
+        "status": { "type": "string", "enum": ["focus", "primary", "upcoming", "dump", "archive"] },
+        "priority": { "type": "string", "enum": ["primary", "secondary", "normal"] },
+        "nature": { "type": "string", "enum": ["one-time", "recurring"] },
+        "deadline": { "type": "number" },
+        "focusDate": { "type": "number" },
+        "effort": { "type": "string", "enum": ["quick", "deep", "hyperfocus"] },
+        "dueDate": { "type": "number" },
+        "prerequisites": { "type": "array" }
+      },
+      "required": ["userId", "text", "completed", "createdAt", "status", "priority", "nature"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Tasks belonging to the specific user"
+    }
+  }
+}

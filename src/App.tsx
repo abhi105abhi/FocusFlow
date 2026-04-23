@@ -25,8 +25,12 @@ import {
   Archive,
   Dices,
   Sparkles,
+  LogOut,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { auth, db } from "./lib/firebase";
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from "firebase/auth";
+import { collection, doc, writeBatch, onSnapshot } from "firebase/firestore";
 
 // --- Types ---
 type EffortSize = "quick" | "standard" | "deep";
@@ -135,6 +139,61 @@ function useLocalStorage<T>(key: string, initialValue: T) {
   }, [key, storedValue]);
 
   return [storedValue, setStoredValue] as const;
+}
+
+function useFirebaseTasks(user: User | null, initialValue: Task[]): [Task[], React.Dispatch<React.SetStateAction<Task[]>>, boolean] {
+  const [tasks, setTasksState] = useState<Task[]>(initialValue);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+    const unsub = onSnapshot(collection(db, `users/${user.uid}/tasks`), (snapshot) => {
+      const mapped = snapshot.docs.map(d => {
+        const data = d.data() as any;
+        return {
+          ...data,
+          userId: undefined // Strip user id so app doesn't save it inside components
+        } as Task;
+      });
+      setTasksState(mapped as Task[]);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Firestore Error:", error);
+      setIsLoading(false);
+    });
+    return unsub;
+  }, [user]);
+
+  const setTasks: React.Dispatch<React.SetStateAction<Task[]>> = (action) => {
+    setTasksState(prev => {
+      const next = typeof action === 'function' ? (action as any)(prev) : action;
+      
+      if (user) {
+        const batch = writeBatch(db);
+        const nextMap = new Map(next.map((t: Task) => [t.id, t]));
+        const prevMap = new Map(prev.map((t: Task) => [t.id, t]));
+        
+        prev.forEach((t: Task) => {
+          if (!nextMap.has(t.id)) {
+            batch.delete(doc(db, `users/${user.uid}/tasks/${t.id}`));
+          }
+        });
+        next.forEach((t: Task) => {
+           const old = prevMap.get(t.id);
+           if (!old || JSON.stringify(old) !== JSON.stringify(t)) {
+             batch.set(doc(db, `users/${user.uid}/tasks/${t.id}`), { ...t, userId: user.uid });
+           }
+        });
+        batch.commit().catch(console.error);
+      }
+      return next;
+    });
+  };
+
+  return [tasks, setTasks, isLoading];
 }
 
 // --- Components ---
@@ -492,7 +551,7 @@ function TaskCard({
           </div>
         </div>
 
-        <div className="flex items-center gap-1 md:gap-2 shrink-0 self-center opacity-0 group-hover/card:opacity-100 transition-all duration-300 translate-x-2 group-hover/card:translate-x-0">
+        <div className="flex items-center gap-1 md:gap-2 shrink-0 self-center md:opacity-0 md:group-hover/card:opacity-100 transition-all duration-300 md:translate-x-2 md:group-hover/card:translate-x-0">
           {task.status === "dump" && (
             <button
               onClick={(e) => {
@@ -997,7 +1056,19 @@ function TriageQuiz({
 
 // --- Main Application ---
 export default function App() {
-  const [tasks, setTasks] = useLocalStorage<Task[]>("ff_v3_tasks", []);
+  const [user, setUser] = useState<User | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthInitialized(true);
+    });
+    return unsub;
+  }, []);
+
+  const [tasks, setTasks, isTasksLoading] = useFirebaseTasks(user, []);
+  
   const [lastAcknowledge, setLastAcknowledge] = useLocalStorage<number>(
     "ff_v3_last_ack",
     0,
@@ -1296,8 +1367,54 @@ export default function App() {
     return true;
   });
 
+  const handleSignOut = () => signOut(auth);
+
+  if (!authInitialized || (user && isTasksLoading)) {
+    return (
+      <div className="min-h-screen bg-slate-50/20 flex items-center justify-center">
+        <Loader2 className="w-12 h-12 text-teal-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#F5F7F6] text-slate-900 selection:bg-teal-100 selection:text-teal-900 overflow-x-hidden flex flex-col items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white rounded-[3rem] p-12 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-100 text-center flex flex-col items-center">
+          <div className="w-20 h-20 bg-teal-50 rounded-[2rem] flex items-center justify-center text-teal-500 mb-8">
+            <Target className="w-10 h-10" />
+          </div>
+          <h1 className="text-3xl font-black tracking-tight mb-4">FocusFlow</h1>
+          <p className="text-slate-500 font-medium mb-10 leading-relaxed">Neurodivergent-optimized task management with real-time cross device synchronization.</p>
+          
+          <button 
+            onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
+            className="w-full py-4 px-6 bg-slate-900 text-white rounded-2xl font-bold tracking-wide hover:bg-slate-800 transition-colors flex items-center justify-center gap-3"
+          >
+            Continue with Google
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50/20 text-slate-900 selection:bg-teal-100 selection:text-teal-900 overflow-x-hidden">
+      
+      {/* Top Navigation Floating Items */}
+      <div className="fixed top-6 right-6 md:top-10 md:right-12 z-40 flex items-center gap-3">
+        {user.photoURL && (
+          <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-full border-2 border-white shadow-sm" referrerPolicy="no-referrer" />
+        )}
+        <button 
+          onClick={handleSignOut}
+          className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 shadow-sm border border-slate-100 transition-all focus:outline-none"
+          title="Sign Out"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
+      </div>
+
       {/* Main Content Area */}
       <main className="pt-16 md:pt-24 pb-48 px-6 md:px-12 max-w-5xl mx-auto w-full">
         <div className="mb-10">

@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { 
+      return request.auth != null; 
+    }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    
+    function incoming() { 
+      return request.resource.data; 
+    }
+    
+    function existing() { 
+      return resource.data; 
+    }
+
+    function isValidTask(data, userId) {
+      return data.keys().hasAll(['userId', 'text', 'completed', 'createdAt', 'status', 'priority', 'nature']) &&
+             data.userId == userId &&
+             data.text is string && data.text.size() <= 1000 &&
+             data.completed is bool &&
+             data.createdAt is number &&
+             data.status in ["focus", "primary", "upcoming", "dump", "archive"] &&
+             data.priority in ["primary", "secondary", "normal"] &&
+             data.nature in ["one-time", "recurring"] &&
+             (!('note' in data) || (data.note is string && data.note.size() <= 5000)) &&
+             (!('completedAt' in data) || data.completedAt is number) &&
+             (!('deadline' in data) || data.deadline is number) &&
+             (!('focusDate' in data) || data.focusDate is number) &&
+             (!('dueDate' in data) || data.dueDate is number) &&
+             (!('effort' in data) || data.effort in ["quick", "deep", "hyperfocus"]) &&
+             (!('prerequisites' in data) || (data.prerequisites is list && data.prerequisites.size() <= 50)) &&
+             (!('recurringRules' in data) || data.recurringRules is map) &&
+             (!('subtasks' in data) || (data.subtasks is list && data.subtasks.size() <= 100));
+    }
+
+    match /users/{userId} {
+      // Basic container lock
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      
+      match /tasks/{taskId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+        
+        allow create: if isSignedIn() && 
+                         request.auth.uid == userId && 
+                         request.auth.token.email_verified == true &&
+                         isValidId(userId) && isValidId(taskId) &&
+                         isValidTask(incoming(), userId);
+                         
+        allow update: if isSignedIn() && 
+                         request.auth.uid == userId &&
+                         isValidTask(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'text', 'completed', 'status', 'priority', 'nature', 'note',
+                           'completedAt', 'deadline', 'focusDate', 'dueDate', 'effort',
+                           'prerequisites', 'recurringRules', 'subtasks'
+                         ]);
+                         
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+  }
+}
