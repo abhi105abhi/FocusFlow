@@ -410,7 +410,7 @@ function TaskCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.98 }}
       whileHover={{ y: -2 }}
-      className={`relative group/card bg-white rounded-[2.5rem] p-5 md:p-7 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_50px_rgba(0,0,0,0.08)] border border-slate-100/50 transition-all duration-500 overflow-hidden ${isBlocked && !task.completed ? "opacity-90" : ""}`}
+      className={`relative group/card bg-white rounded-[2.5rem] p-5 md:p-8 shadow-[0_4px_25px_rgba(0,0,0,0.03)] hover:shadow-[0_40px_80px_rgba(0,0,0,0.08)] border border-slate-100/60 transition-all duration-700 overflow-hidden ${isBlocked && !task.completed ? "opacity-90" : ""}`}
     >
       {/* Subtle Gradient Accent */}
       <div className={`absolute top-0 inset-x-0 h-1.5 opacity-0 group-hover/card:opacity-100 transition-opacity ${task.priority === "primary" ? "bg-gradient-to-r from-rose-400 to-rose-600" : "bg-gradient-to-r from-teal-400 to-teal-600"}`} />
@@ -489,14 +489,14 @@ function TaskCard({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 self-center">
+        <div className="flex items-center gap-1 md:gap-2 shrink-0 self-center opacity-0 group-hover/card:opacity-100 transition-all duration-300 translate-x-2 group-hover/card:translate-x-0">
           {task.status === "dump" && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onPromote();
               }}
-              className="w-10 h-10 flex items-center justify-center text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-2xl transition-all"
+              className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-2xl transition-all"
               title="Promote to Primary"
             >
               <Zap className="w-5 h-5" />
@@ -507,7 +507,7 @@ function TaskCard({
               e.stopPropagation();
               onDelete();
             }}
-            className="w-10 h-10 flex items-center justify-center text-slate-200 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"
+            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"
             title="Delete task"
           >
             <Trash2 className="w-5 h-5" />
@@ -795,39 +795,41 @@ function TaskCard({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 bg-white backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center"
+            className="absolute inset-0 z-[100] bg-white/98 backdrop-blur-2xl flex flex-col items-center justify-center p-5 md:p-8 text-center overflow-y-auto no-scrollbar"
           >
-            <div className="mb-6">
-              <div className="w-16 h-16 bg-teal-100 rounded-2xl flex items-center justify-center text-teal-600 mb-4 mx-auto">
-                <Sparkles className="w-8 h-8" />
+            <div className="w-full max-w-xs mx-auto flex flex-col items-center py-4">
+              <div className="mb-6">
+                <div className="w-16 h-16 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600 mb-4 mx-auto shadow-sm">
+                  <Sparkles className="w-8 h-8" />
+                </div>
+                <h4 className="text-xl font-black italic tracking-tighter text-slate-900">
+                  Seal Evidence
+                </h4>
+                <p className="text-[10px] font-black text-slate-400 mt-1 uppercase tracking-widest leading-tight px-4">
+                  Prove it is done to silence the mind
+                </p>
               </div>
-              <h4 className="text-xl font-black italic tracking-tighter">
-                Closing Ritual
-              </h4>
-              <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">
-                Prove it is done to silence the mind
-              </p>
-            </div>
-            <textarea
-              autoFocus
-              placeholder="Write one sentence of proof... (e.g. 'Sent the email to HR')"
-              className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-semibold focus:outline-none border border-slate-200 mb-6 min-h-[80px]"
-              value={closureNote}
-              onChange={(e) => setClosureNote(e.target.value)}
-            />
-            <div className="flex gap-4 w-full">
-              <button
-                onClick={() => setShowClosure(false)}
-                className="flex-1 py-3 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={finishClosure}
-                className="flex-[2] py-4 bg-teal-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-teal-600/20"
-              >
-                Seal Evidence
-              </button>
+              <textarea
+                autoFocus
+                placeholder="Write one sentence of proof..."
+                className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-semibold focus:outline-none border border-slate-200 mb-6 min-h-[100px] shadow-inner placeholder:text-slate-300"
+                value={closureNote}
+                onChange={(e) => setClosureNote(e.target.value)}
+              />
+              <div className="flex gap-4 w-full">
+                <button
+                  onClick={() => setShowClosure(false)}
+                  className="flex-1 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  Abort
+                </button>
+                <button
+                  onClick={finishClosure}
+                  className="flex-[2] py-4 bg-teal-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-teal-600/30 hover:bg-teal-700 transition-all active:scale-95"
+                >
+                  Seal Ritual
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -850,17 +852,24 @@ function TriageQuiz({
   if (index >= tasks.length) {
     return (
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="flex flex-col items-center gap-6"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="flex flex-col items-center gap-10 text-center"
       >
-        <div className="w-20 h-20 bg-teal-500 rounded-full flex items-center justify-center text-white shadow-2xl">
-          <Check className="w-10 h-10" />
+        <div className="w-24 h-24 bg-teal-500 rounded-full flex items-center justify-center text-white shadow-[0_0_50px_rgba(20,184,166,0.3)]">
+          <Check className="w-12 h-12" strokeWidth={3} />
         </div>
-        <h2 className="text-3xl font-black italic">Triage Complete</h2>
+        <div>
+          <h2 className="text-4xl md:text-5xl font-black text-slate-900 italic tracking-tighter mb-4">
+            Allocation Complete
+          </h2>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] leading-relaxed">
+            Neural bandwidth optimized for surgical execution
+          </p>
+        </div>
         <button
           onClick={onComplete}
-          className="px-12 py-4 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest"
+          className="px-20 py-6 bg-slate-900 text-white rounded-[3rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl hover:scale-105 active:scale-95 transition-all"
         >
           Return to Command
         </button>
@@ -869,27 +878,31 @@ function TriageQuiz({
   }
 
   return (
-    <div className="max-w-xl w-full text-center">
-      <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-4 block">
-        Triage Protocol active: {index + 1}/{tasks.length}
-      </span>
-      <h2 className="text-4xl font-display font-black italic text-slate-900 mb-12 leading-tight">
+    <div className="max-w-3xl w-full text-center py-12 px-6">
+      <div className="flex items-center justify-center gap-3 mb-16">
+        <div className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse shadow-[0_0_8px_rgba(20,184,166,0.5)]" />
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em]">
+          Triage Sequence {index + 1} / {tasks.length}
+        </span>
+      </div>
+      
+      <h2 className="text-5xl md:text-8xl font-display font-black italic text-slate-900 mb-20 leading-[0.95] tracking-tighter">
         "{current.text}"
       </h2>
 
-      <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <button
           onClick={() => setIndex((i) => i + 1)}
-          className="group p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] hover:border-teal-500 hover:bg-teal-50 transition-all text-left"
+          className="group relative p-12 bg-white border border-slate-100 rounded-[4rem] hover:border-teal-500 hover:shadow-[0_40px_80px_rgba(0,0,0,0.06)] transition-all text-left"
         >
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-teal-100 rounded-2xl flex items-center justify-center text-teal-600 group-hover:scale-110 transition-transform">
-              <Zap className="w-6 h-6" />
+          <div className="flex flex-col gap-8">
+            <div className="w-16 h-16 bg-teal-50 rounded-[1.5rem] flex items-center justify-center text-teal-600 group-hover:scale-110 group-hover:bg-teal-500 group-hover:text-white transition-all shadow-sm">
+              <Zap className="w-8 h-8" />
             </div>
             <div>
-              <h5 className="font-black text-slate-900">Execute Today</h5>
-              <p className="text-xs font-bold text-slate-400 uppercase mt-1">
-                Add to surgical focus
+              <h5 className="font-black text-2xl text-slate-900 tracking-tight">Surgical focus</h5>
+              <p className="text-[10px] font-black text-slate-400 uppercase mt-2 tracking-[0.2em] leading-relaxed">
+                Add to immediate execution stack for today.
               </p>
             </div>
           </div>
@@ -897,16 +910,16 @@ function TriageQuiz({
 
         <button
           onClick={() => setIndex((i) => i + 1)}
-          className="group p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] hover:border-indigo-500 hover:bg-indigo-50 transition-all text-left"
+          className="group relative p-12 bg-white border border-slate-100 rounded-[4rem] hover:border-indigo-500 hover:shadow-[0_40px_80px_rgba(0,0,0,0.06)] transition-all text-left"
         >
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
-              <Clock className="w-6 h-6" />
+          <div className="flex flex-col gap-8">
+            <div className="w-16 h-16 bg-indigo-50 rounded-[1.5rem] flex items-center justify-center text-indigo-600 group-hover:scale-110 group-hover:bg-indigo-500 group-hover:text-white transition-all shadow-sm">
+              <Archive className="w-8 h-8" />
             </div>
             <div>
-              <h5 className="font-black text-slate-900">Leave in Dump</h5>
-              <p className="text-xs font-bold text-slate-400 uppercase mt-1">
-                Requires more gestation
+              <h5 className="font-black text-2xl text-slate-900 tracking-tight">Postpone sync</h5>
+              <p className="text-[10px] font-black text-slate-400 uppercase mt-2 tracking-[0.2em] leading-relaxed">
+                Keep in incubation for future assessment.
               </p>
             </div>
           </div>
@@ -919,6 +932,10 @@ function TriageQuiz({
 // --- Main Application ---
 export default function App() {
   const [tasks, setTasks] = useLocalStorage<Task[]>("ff_v3_tasks", []);
+  const [lastAcknowledge, setLastAcknowledge] = useLocalStorage<number>(
+    "ff_v3_last_ack",
+    0,
+  );
 
   const [activeView, setActiveView] = useState<
     "focus" | "primary" | "upcoming" | "dump" | "archive"
@@ -1017,8 +1034,10 @@ export default function App() {
         t.focusDate &&
         t.focusDate < todayStart,
     );
-    if (yesterdayFocusMissed) setShowMissedPopup(true);
-  }, []); // Run once on mount
+    if (yesterdayFocusMissed && lastAcknowledge < todayStart) {
+      setShowMissedPopup(true);
+    }
+  }, [lastAcknowledge]); // Added lastAcknowledge to deps
 
   // States for Smart Capture / Voice
   const [isListening, setIsListening] = useState(false);
@@ -1068,11 +1087,13 @@ export default function App() {
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    const deadlineTimestamp = captureDeadline
-      ? new Date(captureDeadline).getTime()
-      : (captureIsPrimary || captureToFocus)
-        ? Date.now() + 86400000
-        : undefined;
+    const deadlineTimestamp = captureNature === "recurring" 
+      ? undefined 
+      : captureDeadline
+        ? new Date(captureDeadline).getTime()
+        : (captureIsPrimary || captureToFocus)
+          ? Date.now() + 86400000
+          : undefined;
 
     const newTasks: Task[] = rawLines.map((text) => ({
       id: crypto.randomUUID(),
@@ -1381,28 +1402,29 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-12 backdrop-blur-3xl bg-white/40"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-12 backdrop-blur-3xl bg-white/40"
             onClick={() => !isProcessing && setIsCapturing(false)}
           >
             <motion.div
               initial={{ scale: 0.95, y: 40 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-4xl glass p-4 rounded-[4rem] shadow-[0_80px_150px_rgba(0,0,0,0.15)] border-white/80"
+              className="w-full max-w-4xl glass rounded-[2.5rem] md:rounded-[4rem] shadow-[0_80px_150px_rgba(0,0,0,0.15)] border-white/80 overflow-hidden flex flex-col max-h-[90vh]"
               onClick={(e) => e.stopPropagation()}
             >
-              <form onSubmit={handleSmartCapture} className="relative">
-                <textarea
-                  autoFocus
-                  rows={2}
-                  value={captureInput}
-                  onChange={(e) => setCaptureInput(e.target.value)}
-                  placeholder="What must be done?"
-                  className="w-full bg-transparent p-6 md:p-12 text-2xl md:text-4xl font-black tracking-tighter text-slate-900 placeholder:text-slate-200 focus:outline-none resize-none leading-none"
-                />
+              <form onSubmit={handleSmartCapture} className="relative flex flex-col h-full">
+                <div className="flex-1 overflow-y-auto w-full pb-4">
+                  <textarea
+                    autoFocus
+                    rows={2}
+                    value={captureInput}
+                    onChange={(e) => setCaptureInput(e.target.value)}
+                    placeholder="What must be done?"
+                    className="w-full bg-transparent p-6 md:p-12 text-3xl md:text-4xl font-black tracking-tighter text-slate-900 placeholder:text-slate-200 focus:outline-none resize-none leading-none"
+                  />
 
-                <div className="px-6 md:px-12 pb-8 flex flex-col gap-8">
-                  <div className="flex flex-wrap items-center gap-6">
+                  <div className="px-6 md:px-12 pb-2 flex flex-col gap-6 md:gap-8">
+                  <div className="flex flex-wrap items-center gap-4 md:gap-6">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <div
                         onClick={() => setCaptureIsPrimary(!captureIsPrimary)}
@@ -1428,7 +1450,7 @@ export default function App() {
                       </span>
                     </button>
 
-                    {captureIsPrimary && (
+                    {captureIsPrimary && captureNature !== "recurring" && (
                       <motion.div
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -1447,7 +1469,7 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-6">
+                  <div className="flex flex-wrap items-center gap-4 md:gap-6">
                     <div className="flex bg-slate-100 p-1 rounded-xl">
                       {(["one-time", "recurring"] as TaskNature[]).map(
                         (nature) => (
@@ -1467,7 +1489,7 @@ export default function App() {
                       <motion.div
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className="flex items-center gap-4"
+                        className="flex flex-wrap items-center gap-3 md:gap-4"
                       >
                         <select
                           value={captureFreq}
@@ -1482,7 +1504,7 @@ export default function App() {
                         </select>
 
                         {captureFreq === "weekly" && (
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap gap-1">
                             {["S", "m", "t", "w", "t", "f", "s"].map((d, i) => (
                               <button
                                 key={i}
@@ -1511,15 +1533,16 @@ export default function App() {
                     )}
                   </div>
                 </div>
-
-                <div className="flex flex-col md:flex-row items-center justify-between p-4 md:p-8 bg-slate-50/80 rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-100 mt-4 shadow-inner gap-4">
+                </div>
+                
+                <div className="flex flex-col md:flex-row items-center justify-between p-5 md:p-8 bg-slate-50/80 rounded-b-[2.5rem] md:rounded-[0rem] md:rounded-b-[4rem] border-t border-slate-100 mt-auto shadow-inner gap-6 md:gap-4 shrink-0">
                   <div className="flex items-center gap-4 md:gap-6 text-slate-400 w-full md:w-auto">
                     <button
                       type="button"
                       onClick={handleToggleMic}
-                      className={`p-4 md:p-5 rounded-[1.25rem] md:rounded-[1.5rem] transition-all shadow-xl ${isListening ? "bg-rose-500 text-white shadow-rose-500/30 animate-pulse" : "bg-white hover:text-slate-900"}`}
+                      className={`p-4 rounded-2xl md:rounded-[1.5rem] transition-all shadow-xl shrink-0 ${isListening ? "bg-rose-500 text-white shadow-rose-500/30 animate-pulse" : "bg-white hover:text-slate-900"}`}
                     >
-                      <Mic className="w-6 h-6 md:w-7 md:h-7" />
+                      <Mic className="w-6 h-6" />
                     </button>
                     <div className="flex flex-col">
                       <span className="text-[10px] font-black uppercase tracking-widest leading-none mb-1">
@@ -1530,24 +1553,26 @@ export default function App() {
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 w-full md:w-auto">
+                  <div className="flex flex-col-reverse md:flex-row items-stretch md:items-center gap-4 w-full md:w-auto">
                     <button
                       type="button"
                       onClick={() => setIsCapturing(false)}
-                      className="flex-1 md:flex-none px-6 md:px-8 py-3 md:py-4 font-bold text-slate-400 hover:text-slate-600 transition-colors text-sm md:text-base"
+                      className="px-6 py-4 font-bold text-slate-400 hover:text-slate-600 transition-colors text-xs uppercase tracking-widest md:text-sm"
                     >
                       Abort
                     </button>
                     <button
                       type="submit"
-                      className="flex-[2] md:flex-none bg-slate-900 text-white px-8 md:px-12 py-4 md:py-5 rounded-[2rem] md:rounded-[2.5rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-2 md:gap-3 shadow-2xl shadow-slate-900/30"
+                      className="flex-1 md:flex-none bg-slate-900 text-white px-8 md:px-12 py-5 md:py-5 rounded-[1.5rem] md:rounded-[2.5rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-2 md:gap-3 shadow-2xl shadow-slate-900/30"
                     >
                       {isProcessing ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <Loader2 className="w-5 h-5 animate-spin shrink-0" />
                       ) : (
-                        <Sparkles className="w-5 h-5" />
+                        <Sparkles className="w-5 h-5 shrink-0" />
                       )}
-                      <span className="whitespace-nowrap">Commit Dump</span>
+                      <span className="whitespace-nowrap">
+                        {captureToFocus ? "Launch Focus" : captureIsPrimary ? "Commit Primary" : "Commit Dump"}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1610,7 +1635,10 @@ export default function App() {
                     new Date().getDate(),
                   ).getTime(),
             )}
-            onClose={() => setShowMissedPopup(false)}
+            onClose={() => {
+              setShowMissedPopup(false);
+              setLastAcknowledge(Date.now());
+            }}
             onComplete={(id) => {
               setTasks((prev) =>
                 prev.map((t) =>
@@ -1642,7 +1670,7 @@ function MissedFocusOverlay({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 z-[300] bg-rose-600 flex items-center justify-center p-6 md:p-12 overflow-y-auto"
+      className="fixed inset-0 z-[300] bg-slate-950/80 backdrop-blur-3xl flex items-center justify-center p-6 md:p-12 overflow-y-auto no-scrollbar"
     >
       <div className="max-w-2xl w-full">
         <div className="flex justify-between items-start mb-12 text-left">
