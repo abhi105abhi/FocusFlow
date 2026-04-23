@@ -32,6 +32,8 @@ import { auth, db } from "./lib/firebase";
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from "firebase/auth";
 import { collection, doc, writeBatch, onSnapshot } from "firebase/firestore";
 
+import AppTour from "./components/Tour";
+
 // --- Types ---
 type EffortSize = "quick" | "standard" | "deep";
 type TaskStatus = "focus" | "primary" | "upcoming" | "dump" | "archive";
@@ -1399,10 +1401,12 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/20 text-slate-900 selection:bg-teal-100 selection:text-teal-900 overflow-x-hidden">
-      
-      {/* Top Navigation Floating Items */}
-      <div className="fixed top-6 right-6 md:top-10 md:right-12 z-40 flex items-center gap-3">
+    <>
+      <AppTour />
+      <div className="min-h-screen bg-slate-50/20 text-slate-900 selection:bg-teal-100 selection:text-teal-900 overflow-x-hidden">
+        
+        {/* Top Navigation Floating Items */}
+        <div className="tour-user-menu fixed top-6 right-6 md:top-10 md:right-12 z-40 flex items-center gap-3">
         {user.photoURL && (
           <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-full border-2 border-white shadow-sm" referrerPolicy="no-referrer" />
         )}
@@ -1618,7 +1622,7 @@ export default function App() {
             <button
               key={item.id}
               onClick={() => setActiveView(item.id as any)}
-              className={`relative px-4 py-3 md:px-8 md:py-5 rounded-[2rem] md:rounded-[2.5rem] flex items-center gap-2 md:gap-3 transition-all ${activeView === item.id ? "bg-slate-900 text-white shadow-xl" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"}`}
+              className={`tour-nav-${item.id} relative px-4 py-3 md:px-8 md:py-5 rounded-[2rem] md:rounded-[2.5rem] flex items-center gap-2 md:gap-3 transition-all ${activeView === item.id ? "bg-slate-900 text-white shadow-xl" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"}`}
             >
               <item.icon className="w-4 h-4 md:w-5 md:h-5" />
               <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">
@@ -1636,7 +1640,7 @@ export default function App() {
           <div className="w-px h-6 md:h-10 bg-slate-200 mx-1 md:mx-2" />
           <button
             onClick={() => setIsCapturing(true)}
-            className="w-12 h-12 md:w-20 md:h-20 bg-teal-500 text-white rounded-full flex items-center justify-center shadow-xl shadow-teal-500/30 hover:scale-105 active:scale-95 transition-all group shrink-0"
+            className="tour-capture-btn w-12 h-12 md:w-20 md:h-20 bg-teal-500 text-white rounded-full flex items-center justify-center shadow-xl shadow-teal-500/30 hover:scale-105 active:scale-95 transition-all group shrink-0"
           >
             <Plus className="w-6 h-6 md:w-8 md:h-8 group-hover:rotate-90 transition-transform" />
           </button>
@@ -1900,6 +1904,7 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+    </>
   );
 }
 
