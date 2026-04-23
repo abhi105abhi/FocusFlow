@@ -38,6 +38,7 @@ type RecurringFrequency = "daily" | "weekly" | "monthly";
 interface RecurringRules {
   frequency: RecurringFrequency;
   days?: number[]; // [0-6] for weekly, dates 1-31 for monthly
+  exceptions?: string[]; // Array of YYYY-MM-DD strings to skip
 }
 
 // Research-Driven Additions
@@ -323,6 +324,7 @@ function TaskCard({
   onPromote,
   onGrabEarly,
   onUpdateRecurring,
+  onRemoveRecurring,
   onSetDeadline,
   activationWeight,
 }: {
@@ -340,7 +342,8 @@ function TaskCard({
   onToggleDependency: (depId: string) => void;
   onPromote: () => void;
   onGrabEarly: () => void;
-  onUpdateRecurring: (frequency: RecurringFrequency, days: number[]) => void;
+  onUpdateRecurring: (frequency: RecurringFrequency, days: number[], exceptions?: string[]) => void;
+  onRemoveRecurring: () => void;
   onSetDeadline: (deadline: number | null) => void;
   activationWeight: number;
 }) {
@@ -410,7 +413,7 @@ function TaskCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.98 }}
       whileHover={{ y: -2 }}
-      className={`relative group/card bg-white rounded-[2.5rem] p-5 md:p-8 shadow-[0_4px_25px_rgba(0,0,0,0.03)] hover:shadow-[0_40px_80px_rgba(0,0,0,0.08)] border border-slate-100/60 transition-all duration-700 overflow-hidden ${isBlocked && !task.completed ? "opacity-90" : ""}`}
+      className={`relative group/card bg-white rounded-[2.5rem] p-5 md:p-8 shadow-[0_4px_25px_rgba(0,0,0,0.03)] hover:shadow-[0_40px_80px_rgba(0,0,0,0.08)] border border-slate-100/60 transition-all duration-700 overflow-hidden ${isBlocked && !task.completed ? "opacity-90" : ""} ${showClosure ? "min-h-[500px]" : ""}`}
     >
       {/* Subtle Gradient Accent */}
       <div className={`absolute top-0 inset-x-0 h-1.5 opacity-0 group-hover/card:opacity-100 transition-opacity ${task.priority === "primary" ? "bg-gradient-to-r from-rose-400 to-rose-600" : "bg-gradient-to-r from-teal-400 to-teal-600"}`} />
@@ -516,6 +519,85 @@ function TaskCard({
       </div>
 
       <AnimatePresence>
+        {((task.subtasks && task.subtasks.length > 0) || expanded) && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="ml-0 md:ml-16 mt-4 flex flex-col gap-2">
+              <AnimatePresence>
+                {task.subtasks?.map((sub) => (
+                  <motion.div
+                    layout
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    key={sub.id}
+                    className={`flex items-center gap-3 p-2.5 rounded-xl border transition-all ${sub.completed ? "bg-slate-50/60 border-transparent opacity-60" : "bg-white border-slate-200 shadow-sm hover:border-teal-200"}`}
+                  >
+                    <button
+                      onClick={() => onToggleSubtask(sub.id)}
+                      className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${sub.completed ? "border-teal-500 bg-teal-500 shadow-md shadow-teal-500/20" : "border-slate-300 hover:border-teal-400 bg-white"}`}
+                    >
+                      {sub.completed && (
+                        <Check
+                          className="w-3 h-3 text-white"
+                          strokeWidth={3.5}
+                        />
+                      )}
+                    </button>
+                    <span
+                      className={`text-sm font-bold flex-1 transition-colors outline-none ${sub.completed ? "text-slate-400 line-through decoration-slate-300" : "text-slate-700"}`}
+                    >
+                      {sub.text}
+                    </span>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              <AnimatePresence>
+                {expanded && (
+                  <motion.form 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    onSubmit={submitSubtask} 
+                    className="flex relative group items-center mt-1 overflow-hidden"
+                  >
+                    <div className="absolute left-3 text-slate-300 group-focus-within:text-teal-500 transition-colors pointer-events-none">
+                      <Plus className="w-4 h-4" strokeWidth={3} />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Add a micro-step..."
+                      value={subInput}
+                      onChange={(e) => setSubInput(e.target.value)}
+                      className="w-full bg-slate-50/80 hover:bg-slate-100/80 focus:bg-white border border-transparent focus:border-teal-400 py-2 pl-9 pr-4 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-4 focus:ring-teal-500/10 placeholder:text-slate-400 font-bold transition-all"
+                    />
+                    <AnimatePresence>
+                      {subInput.trim() && (
+                        <motion.button
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          type="submit"
+                          className="absolute right-2 px-3 py-1 bg-teal-100 text-teal-700 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-teal-200 transition-colors"
+                        >
+                          Add
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
+                  </motion.form>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {expanded && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
@@ -532,47 +614,7 @@ function TaskCard({
               {isBlocked ? "Task is currently Blocked" : "Start Focus Session"}
             </button>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-              <div className="flex flex-col gap-4">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
-                  Subtasks
-                </span>
-                <div className="flex flex-col gap-2">
-                  {task.subtasks?.map((sub) => (
-                    <div
-                      key={sub.id}
-                      className="flex items-start gap-3 group/sub"
-                    >
-                      <button
-                        onClick={() => onToggleSubtask(sub.id)}
-                        className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${sub.completed ? "border-teal-500 bg-teal-500 shadow-lg shadow-teal-500/20" : "border-slate-300 hover:border-slate-400 bg-white"}`}
-                      >
-                        {sub.completed && (
-                          <Check
-                            className="w-3 h-3 text-white"
-                            strokeWidth={3}
-                          />
-                        )}
-                      </button>
-                      <span
-                        className={`text-sm font-semibold transition-colors ${sub.completed ? "text-slate-400 line-through" : "text-slate-700"}`}
-                      >
-                        {sub.text}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <form onSubmit={submitSubtask} className="flex mt-2">
-                  <input
-                    type="text"
-                    placeholder="Add a micro-step..."
-                    value={subInput}
-                    onChange={(e) => setSubInput(e.target.value)}
-                    className="bg-transparent border-b border-slate-200 pb-2 text-sm text-slate-700 focus:outline-none focus:border-teal-500 w-full placeholder:text-slate-400 font-bold"
-                  />
-                </form>
-              </div>
-
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               <div className="flex flex-col gap-4">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
                   Prerequisites
@@ -665,7 +707,7 @@ function TaskCard({
                           <button
                             key={freq}
                             onClick={() =>
-                              onUpdateRecurring(freq, task.recurringRules?.days || [])
+                              onUpdateRecurring(freq, task.recurringRules?.days || [], task.recurringRules?.exceptions)
                             }
                             className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg border transition-all ${task.nature === "recurring" && task.recurringRules?.frequency === freq ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"}`}
                           >
@@ -675,19 +717,7 @@ function TaskCard({
                       )}
                       {task.nature === "recurring" && (
                         <button
-                          onClick={() => {
-                            setTasks((prev) =>
-                              prev.map((t) =>
-                                t.id === task.id
-                                  ? {
-                                      ...t,
-                                      nature: "one-time",
-                                      recurringRules: undefined,
-                                    }
-                                  : t,
-                              ),
-                            );
-                          }}
+                          onClick={onRemoveRecurring}
                           className="px-3 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 transition-all"
                         >
                           X
@@ -706,7 +736,7 @@ function TaskCard({
                                 const newDays = currentDays.includes(i)
                                   ? currentDays.filter((d) => d !== i)
                                   : [...currentDays, i];
-                                onUpdateRecurring("weekly", newDays);
+                                onUpdateRecurring("weekly", newDays, task.recurringRules?.exceptions);
                               }}
                               className={`w-7 h-7 rounded-lg text-[10px] font-black flex items-center justify-center transition-all ${task.recurringRules?.days?.includes(i) ? "bg-teal-500 text-white shadow-lg shadow-teal-500/20" : "bg-slate-100 text-slate-400 hover:bg-slate-200"}`}
                             >
@@ -729,7 +759,7 @@ function TaskCard({
                                   const newDays = currentDays.includes(date)
                                     ? currentDays.filter((d) => d !== date)
                                     : [...currentDays, date];
-                                  onUpdateRecurring("monthly", newDays);
+                                  onUpdateRecurring("monthly", newDays, task.recurringRules?.exceptions);
                                 }}
                                 className={`w-6 h-6 rounded-md text-[8px] font-black flex items-center justify-center transition-all ${task.recurringRules?.days?.includes(date) ? "bg-teal-500 text-white" : "bg-white text-slate-400 border border-slate-100"}`}
                               >
@@ -739,36 +769,72 @@ function TaskCard({
                           )}
                         </div>
                       )}
+
+                    {task.nature === "recurring" && task.recurringRules && (
+                      <div className="flex flex-col gap-2 mt-2">
+                        <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
+                          Skip Dates (Exceptions)
+                        </span>
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {task.recurringRules.exceptions?.map((dateStr) => (
+                            <span key={dateStr} className="px-2 py-1 bg-rose-50 text-rose-600 border border-rose-100 rounded-md text-[10px] font-bold flex items-center gap-1 shrink-0">
+                              {dateStr}
+                              <button onClick={() => {
+                                const newEx = task.recurringRules?.exceptions?.filter(d => d !== dateStr) || [];
+                                onUpdateRecurring(task.recurringRules!.frequency, task.recurringRules!.days || [], newEx);
+                              }} className="hover:text-rose-800 transition-colors">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                          <input 
+                            type="date" 
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                const currentObj = task.recurringRules?.exceptions || [];
+                                if (!currentObj.includes(e.target.value)) {
+                                  onUpdateRecurring(task.recurringRules!.frequency, task.recurringRules!.days || [], [...currentObj, e.target.value]);
+                                }
+                                e.target.value = "";
+                              }
+                            }} 
+                            className="bg-slate-50 border border-slate-200 text-slate-500 rounded-md text-[10px] uppercase font-bold px-2 py-1 focus:outline-none focus:ring-1 focus:ring-slate-300" 
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
-                      Target Deadline
-                    </span>
-                    <div className="flex gap-2">
-                      <input
-                        type="date"
-                        value={
-                          task.deadline
-                            ? new Date(task.deadline).toISOString().split("T")[0]
-                            : ""
-                        }
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          onSetDeadline(val ? new Date(val).getTime() : null);
-                        }}
-                        className="flex-1 px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 ring-indigo-500/20"
-                      />
-                      {task.deadline && (
-                        <button
-                          onClick={() => onSetDeadline(null)}
-                          className="px-3 py-2 bg-rose-50 text-rose-500 border border-rose-100 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                        >
-                          Clear
-                        </button>
-                      )}
+                  {task.nature !== "recurring" && (
+                    <div className="flex flex-col gap-2">
+                      <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
+                        Target Deadline
+                      </span>
+                      <div className="flex gap-2">
+                        <input
+                          type="date"
+                          value={
+                            task.deadline
+                              ? new Date(task.deadline).toISOString().split("T")[0]
+                              : ""
+                          }
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            onSetDeadline(val ? new Date(val).getTime() : null);
+                          }}
+                          className="flex-1 px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 ring-indigo-500/20"
+                        />
+                        {task.deadline && (
+                          <button
+                            onClick={() => onSetDeadline(null)}
+                            className="px-3 py-2 bg-rose-50 text-rose-500 border border-rose-100 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -797,35 +863,35 @@ function TaskCard({
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-[100] bg-white/98 backdrop-blur-2xl flex flex-col items-center justify-center p-5 md:p-8 text-center overflow-y-auto no-scrollbar"
           >
-            <div className="w-full max-w-xs mx-auto flex flex-col items-center py-4">
+            <div className="w-full max-w-lg mx-auto flex flex-col items-center py-6">
               <div className="mb-6">
                 <div className="w-16 h-16 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600 mb-4 mx-auto shadow-sm">
                   <Sparkles className="w-8 h-8" />
                 </div>
-                <h4 className="text-xl font-black italic tracking-tighter text-slate-900">
+                <h4 className="text-2xl font-black italic tracking-tighter text-slate-900">
                   Seal Evidence
                 </h4>
-                <p className="text-[10px] font-black text-slate-400 mt-1 uppercase tracking-widest leading-tight px-4">
+                <p className="text-xs font-black text-slate-400 mt-2 uppercase tracking-widest leading-tight px-4">
                   Prove it is done to silence the mind
                 </p>
               </div>
               <textarea
                 autoFocus
                 placeholder="Write one sentence of proof..."
-                className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-semibold focus:outline-none border border-slate-200 mb-6 min-h-[100px] shadow-inner placeholder:text-slate-300"
+                className="w-full bg-slate-50 p-6 rounded-3xl text-base font-semibold focus:outline-none border border-slate-200 mb-8 min-h-[140px] shadow-inner placeholder:text-slate-300 resize-none"
                 value={closureNote}
                 onChange={(e) => setClosureNote(e.target.value)}
               />
               <div className="flex gap-4 w-full">
                 <button
                   onClick={() => setShowClosure(false)}
-                  className="flex-1 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors"
+                  className="flex-1 py-4 text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors"
                 >
                   Abort
                 </button>
                 <button
                   onClick={finishClosure}
-                  className="flex-[2] py-4 bg-teal-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-teal-600/30 hover:bg-teal-700 transition-all active:scale-95"
+                  className="flex-[2] py-4 bg-teal-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-teal-600/30 hover:bg-teal-700 transition-all active:scale-95"
                 >
                   Seal Ritual
                 </button>
@@ -989,26 +1055,31 @@ export default function App() {
           changed = true;
         }
 
-        // 3. Upcoming (Recurring) -> Focus (If scheduled day is today)
+        // 3. Upcoming/Primary (Recurring) -> Focus (If scheduled day is today)
         if (
-          task.status === "upcoming" &&
           task.nature === "recurring" &&
+          task.status !== "archive" &&
+          task.status !== "focus" &&
           task.recurringRules
         ) {
           const rules = task.recurringRules;
           let shouldTrigger = false;
 
-          if (rules.frequency === "daily") shouldTrigger = true;
-          if (
-            rules.frequency === "weekly" &&
-            rules.days?.includes(now.getDay())
-          )
-            shouldTrigger = true;
-          if (
-            rules.frequency === "monthly" &&
-            rules.days?.includes(now.getDate())
-          )
-            shouldTrigger = true;
+          const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+          if (!rules.exceptions?.includes(todayStr)) {
+            if (rules.frequency === "daily") shouldTrigger = true;
+            if (
+              rules.frequency === "weekly" &&
+              rules.days?.includes(now.getDay())
+            )
+              shouldTrigger = true;
+            if (
+              rules.frequency === "monthly" &&
+              rules.days?.includes(now.getDate())
+            )
+              shouldTrigger = true;
+          }
 
           if (shouldTrigger && task.focusDate !== todayStart) {
             newStatus = "focus";
@@ -1103,10 +1174,10 @@ export default function App() {
       lastInteractedAt: Date.now(),
       status: captureToFocus
         ? "focus"
-        : captureIsPrimary
-          ? "primary"
-          : captureNature === "recurring"
-            ? "upcoming"
+        : captureNature === "recurring"
+          ? "upcoming"
+          : captureIsPrimary
+            ? "primary"
             : "dump",
       focusDate: captureToFocus ? Date.now() : undefined,
       priority: (captureIsPrimary || captureToFocus) ? "primary" : "normal",
@@ -1208,6 +1279,20 @@ export default function App() {
                   <TaskCard
                     task={task}
                     allTasks={tasks}
+                    activationWeight={getActivationWeight(task)}
+                    onRemoveRecurring={() => {
+                      setTasks((prev) =>
+                        prev.map((t) =>
+                          t.id === task.id
+                            ? {
+                                ...t,
+                                nature: "one-time",
+                                recurringRules: undefined,
+                              }
+                            : t,
+                        ),
+                      );
+                    }}
                     onSetDeadline={(d) => {
                       setTasks((prev) =>
                         prev.map((t) =>
@@ -1334,14 +1419,14 @@ export default function App() {
                         ),
                       );
                     }}
-                    onUpdateRecurring={(frequency, days) => {
+                    onUpdateRecurring={(frequency, days, exceptions) => {
                       setTasks((prev) =>
                         prev.map((t) =>
                           t.id === task.id
                             ? {
                                 ...t,
                                 nature: "recurring",
-                                recurringRules: { frequency, days },
+                                recurringRules: { frequency, days, exceptions },
                               }
                             : t,
                         ),
